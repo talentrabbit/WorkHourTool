@@ -1,0 +1,34 @@
+# ASP.NET Core
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+# Build results
+[Dd]ebug/
+[Rr]elease/
+# Npm packages
+node_modules/
+# Logs
+*.log
+# OS generated files
+.DS_Store
+Thumbs.db
+# Rider
+.idea/
+# Visual Studio Code
+.history/
+.env
+.env.*
+# Test results
+TestResults/
+# Publish
+publish/
+# Backup files
+*.bak
+*.tmp
+# Others
+*.swp

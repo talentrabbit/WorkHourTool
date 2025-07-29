@@ -1,0 +1,10 @@
+@backend_HostAddress = http://localhost:5063
+
+POST {{backend_HostAddress}}/api/workhours
+Content-Type: application/json
+
+{
+  "workerName": "John",
+  "mainTime": 3600,
+  "issueTime": 120
+}
