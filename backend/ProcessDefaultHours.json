@@ -1,0 +1,34 @@
+{
+  "Vision 450": {
+    "UnpackageHours": 8,
+    "AssemblyHours": 64,
+    "DebugHours": 40,
+    "ValidationHours": 8,
+    "DisassemblyHours": 24,
+    "RepackageHours": 16
+  },
+  "Mission S": {
+    "UnpackageHours": 8,
+    "AssemblyHours": 64,
+    "DebugHours": 40,
+    "ValidationHours": 8,
+    "DisassemblyHours": 24,
+    "RepackageHours": 16
+  },
+  "Vision SOTA": {
+    "UnpackageHours": 8,
+    "AssemblyHours": 64,
+    "DebugHours": 40,
+    "ValidationHours": 8,
+    "DisassemblyHours": 24,
+    "RepackageHours": 16
+  },
+  "Pro.specta Flow": {
+    "UnpackageHours": 8,
+    "AssemblyHours": 64,
+    "DebugHours": 40,
+    "ValidationHours": 8,
+    "DisassemblyHours": 24,
+    "RepackageHours": 16
+  }
+}

@@ -32,3 +32,9 @@ publish/
 *.tmp
 # Others
 *.swp
+backend/Migrations/*.cs
+*.db-shm
+*.db-wal
+ImportProductsFromCsv/Products.csv
+backend/workhour.db
+backend.Tests/UnitTest1.cs
