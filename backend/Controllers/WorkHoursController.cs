@@ -63,12 +63,21 @@ namespace backend.Controllers
         public DbSet<WorkHour> WorkHours { get; set; }
         public DbSet<NcmTime> NcmTimes { get; set; }
 
-        // Configurable database file path
-        public static string DbFilePath { get; set; } = "workhour.db";
+        // Configurable provider and connection string
+        public static string DbProvider { get; set; } = "sqlite"; // "sqlite" or "sqlserver"
+        public static string ConnectionString { get; set; } = "Data Source=workhour.db";
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            optionsBuilder.UseSqlite($"Data Source={DbFilePath}");
+            if (DbProvider == "sqlite")
+            {
+                optionsBuilder.UseSqlite(ConnectionString);
+            }
+            else if (DbProvider == "sqlserver")
+            {
+                optionsBuilder.UseSqlServer(ConnectionString);
+            }
+            // Add more providers as needed
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)

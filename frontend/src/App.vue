@@ -1,9 +1,6 @@
-<script setup>
-import NavTabs from './components/NavTabs.vue'
-</script>
 
 <template>
-  <NavTabs />
+  <router-view />
 </template>
 
 <style scoped>

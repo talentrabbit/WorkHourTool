@@ -38,3 +38,4 @@ backend/Migrations/*.cs
 ImportProductsFromCsv/Products.csv
 backend/workhour.db
 backend.Tests/UnitTest1.cs
+*.jpg

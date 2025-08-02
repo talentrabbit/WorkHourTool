@@ -34,47 +34,49 @@ function startWork(){
 <template>
   <h2>Work Hours for Current Product</h2>
   <form class="product-form">
-    <div class="form-row">
-      <label for="orderNumber">Order Number</label>
-      <select id="orderNumber" v-model="form.orderNumber">
-        <option value="" disabled>Select Order Number</option>
-        <option v-for="num in orderNumbers" :key="num" :value="num">{{ num }}</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <label for="productName">Product Name</label>
-      <select id="productName" v-model="form.productName">
-        <option value="" disabled>Select Product Name</option>
-        <option v-for="name in productNames" :key="name" :value="name">{{ name }}</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <label for="seriesNo">Series No.</label>
-      <select id="seriesNo" v-model="form.seriesNo">
-        <option value="" disabled>Select Series No.</option>
-        <option v-for="series in seriesNos" :key="series" :value="series">{{ series }}</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <label for="process">Process</label>
-      <select id="process" v-model="form.process">
-        <option value="" disabled>Select Process</option>
-        <option v-for="proc in processes" :key="proc" :value="proc">{{ proc }}</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <label for="workSeat">Work Seat</label>
-      <select id="workSeat" v-model="form.workSeat">
-        <option value="" disabled>Select Work Seat</option>
-        <option v-for="seat in workSeats" :key="seat" :value="seat">{{ seat }}</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <label for="coWorkers">Co-workers</label>
-      <select id="coWorkers" v-model="form.coWorkers" multiple size="3">
-        <option v-for="worker in coWorkers" :key="worker" :value="worker">{{ worker }}</option>
-      </select>
-      <small>Select one or more co-workers if this process requires multiple people.</small>
+    <div class="form-row-columns">
+      <div class="form-row">
+        <label for="orderNumber">Order Number</label>
+        <select id="orderNumber" v-model="form.orderNumber">
+          <option value="" disabled>Select Order Number</option>
+          <option v-for="num in orderNumbers" :key="num" :value="num">{{ num }}</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="productName">Product Name</label>
+        <select id="productName" v-model="form.productName">
+          <option value="" disabled>Select Product Name</option>
+          <option v-for="name in productNames" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="seriesNo">Series No.</label>
+        <select id="seriesNo" v-model="form.seriesNo">
+          <option value="" disabled>Select Series No.</option>
+          <option v-for="series in seriesNos" :key="series" :value="series">{{ series }}</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="process">Process</label>
+        <select id="process" v-model="form.process">
+          <option value="" disabled>Select Process</option>
+          <option v-for="proc in processes" :key="proc" :value="proc">{{ proc }}</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="workSeat">Work Seat</label>
+        <select id="workSeat" v-model="form.workSeat">
+          <option value="" disabled>Select Work Seat</option>
+          <option v-for="seat in workSeats" :key="seat" :value="seat">{{ seat }}</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="coWorkers">Co-workers</label>
+        <select id="coWorkers" v-model="form.coWorkers" multiple size="3">
+          <option v-for="worker in coWorkers" :key="worker" :value="worker">{{ worker }}</option>
+        </select>
+        <small>Select one or more co-workers if this process requires multiple people.</small>
+      </div>
     </div>
     <div class="form-row">
       <label for="startTime">Start Time</label>
@@ -91,19 +93,25 @@ function startWork(){
 </template>
 
 <style scoped>
-.product-form {
-  max-width: 480px;
-  margin: 2em auto 0 auto;
-  padding: 2em;
-  background: #f9f9f9;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px #0001;
-}
-.form-row {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 1em;
-}
+  .product-form {
+    max-width: 600px;
+    margin: 2em auto 0 auto;
+    padding: 2em;
+    background: #f9f9f9;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px #0001;
+  }
+  .form-row-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5em;
+    margin-bottom: 1em;
+  }
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 1em;
+  }
 .form-row label {
   margin-bottom: 0.5em;
   font-weight: 500;
