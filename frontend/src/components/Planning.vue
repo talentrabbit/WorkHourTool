@@ -22,12 +22,23 @@
       </div>
     </div>
     <div v-if="searchError" class="error">{{ searchError }}</div>
+
+    <div class="all-products-section">
+      <h3>All Systems Production State</h3>
+      <vxe-table :data="allProducts" border>
+        <vxe-column field="serialNo" title="SerialNo" width="120" />
+        <vxe-column field="projectNo" title="ProjectNo" width="120" />
+        <vxe-column field="systemType" title="SystemType" width="120" />
+        <vxe-column field="state" title="Production State" width="150" />
+      </vxe-table>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import { VXETable } from 'vxe-table'
 
 const serialNo = ref('')
 const product = ref(null)
@@ -41,6 +52,23 @@ const task = ref({
   endTime: ''
 })
 
+const allProducts = ref([])
+
+async function fetchAllProducts() {
+  // You may need to implement an API endpoint to get all products with their WorkHours
+  const res = await axios.get('/api/Products')
+  allProducts.value = res.data.map(p => ({
+    serialNo: p.serialNo,
+    projectNo: p.projectNo,
+    systemType: p.systemType,
+    state: p.workHours?.length ? 'In Progress' : 'Not Started'
+  }))
+}
+
+onMounted(() => {
+  fetchAllProducts()
+})
+
 async function searchProduct() {
   searchError.value = ''
   product.value = null
@@ -48,7 +76,6 @@ async function searchProduct() {
   try {
     const res = await axios.get(`/api/WorkHours/product-status/${serialNo.value}`)
     product.value = res.data
-    // Example: determine state from product info
     productState.value = res.data.WorkHours?.length ? 'In Progress' : 'Not Started'
   } catch (err) {
     searchError.value = err.response?.data?.message || 'Product not found.'
@@ -57,11 +84,10 @@ async function searchProduct() {
 
 async function assignTask() {
   if (!product.value) return
-  // Example: assign task by posting to API (customize as needed)
   await axios.post('/api/WorkHours', {
     WorkerName: task.value.workerName,
-    MainTime: 0, // Set as needed
-    IssueTime: 0, // Set as needed
+    MainTime: 0,
+    IssueTime: 0,
     SerialNo: product.value.serialNo,
     Process: task.value.process,
     Date: task.value.date,
@@ -71,6 +97,7 @@ async function assignTask() {
   alert('Task assigned!')
 }
 </script>
+/* Add vxe-table styles if needed */
 
 <style scoped>
 

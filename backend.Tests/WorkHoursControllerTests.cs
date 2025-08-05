@@ -1,6 +1,7 @@
 using System;
 using Xunit;
 using backend.Controllers;
+using backend.DbModel;
 using Microsoft.AspNetCore.Mvc;
 
 namespace backend.Tests
@@ -20,6 +21,14 @@ namespace backend.Tests
             var controller = new WorkHoursController();
             var result = controller.GetProductWorkStatus("NON_EXISTENT_SN");
             Assert.IsType<NotFoundObjectResult>(result);
+        }
+
+        [Fact]
+        public void GetAllProductStates_ReturnsOkResult()
+        {
+            var controller = new WorkHoursController();
+            var result = controller.GetAllProductStates();
+            Assert.IsType<OkObjectResult>(result);
         }
     }
 }

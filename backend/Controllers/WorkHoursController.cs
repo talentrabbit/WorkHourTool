@@ -2,107 +2,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
+using backend.DbModel;
+using backend.Data;
 
 namespace backend.Controllers
 {
-    // --- Entity Framework Core Models ---
-    public class Product
-    {
-        public int Id { get; set; }
-        public string? ProjectNo { get; set; }
-        public string? IvkNo { get; set; }
-        public string? ModalityType { get; set; }
-        public string? SystemType { get; set; }
-        public string? SerialNo { get; set; }
-        public string? ProductLine { get; set; }
-
-        // New process hour columns
-        public int UnpackageHours { get; set; }
-        public int AssemblyHours { get; set; }
-        public int DebugHours { get; set; }
-        public int ValidationHours { get; set; }
-        public int DisassemblyHours { get; set; }
-        public int RepackageHours { get; set; }
-
-        // New working process column
-        public string? WorkingProcess { get; set; }
-
-        public ICollection<WorkHour> WorkHours { get; set; } = new List<WorkHour>();
-        public ICollection<NcmTime> NcmTimes { get; set; } = new List<NcmTime>();
-    }
-
-    public class WorkHour
-    {
-        public int Id { get; set; }
-        public string? WorkerName { get; set; }
-        public double EffectiveHours { get; set; }
-        public DateTime StartTime { get; set; }
-        public DateTime EndTime { get; set; }
-
-        // Foreign key
-        public int ProductId { get; set; }
-        public Product? Product { get; set; }
-    }
-
-    public class NcmTime
-    {
-        public int Id { get; set; }
-        public string? ProcessEngineer { get; set; }
-        public DateTime StartTime { get; set; }
-        public DateTime EndTime { get; set; }
-
-        // Foreign key
-        public int ProductId { get; set; }
-        public Product? Product { get; set; }
-    }
-
-    // --- Entity Framework Core DbContext ---
-    public class AppDbContext : DbContext
-    {
-        public DbSet<Product> Products { get; set; }
-        public DbSet<WorkHour> WorkHours { get; set; }
-        public DbSet<NcmTime> NcmTimes { get; set; }
-
-        // Configurable provider and connection string
-        public static string DbProvider { get; set; } = "sqlite"; // "sqlite" or "sqlserver"
-        public static string ConnectionString { get; set; } = "Data Source=workhour.db";
-
-        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-        {
-            if (DbProvider == "sqlite")
-            {
-                optionsBuilder.UseSqlite(ConnectionString);
-            }
-            else if (DbProvider == "sqlserver")
-            {
-                optionsBuilder.UseSqlServer(ConnectionString);
-            }
-            // Add more providers as needed
-        }
-
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            modelBuilder.Entity<Product>()
-                .HasIndex(p => p.SerialNo)
-                .IsUnique();
-            // Optionally, configure ProductLine and WorkingProcess if needed (e.g., max length)
-            // modelBuilder.Entity<Product>().Property(p => p.ProductLine).HasMaxLength(100);
-            // modelBuilder.Entity<Product>().Property(p => p.WorkingProcess).HasMaxLength(100);
-
-            modelBuilder.Entity<WorkHour>()
-                .HasOne(w => w.Product)
-                .WithMany(p => p.WorkHours)
-                .HasForeignKey(w => w.ProductId);
-
-            modelBuilder.Entity<NcmTime>()
-                .HasOne(n => n.Product)
-                .WithMany(p => p.NcmTimes)
-                .HasForeignKey(n => n.ProductId);
-        }
-    }
-
-    // --- Controller (unchanged) ---
-
     [ApiController]
     [Route("api/[controller]")]
     public class WorkHoursController : ControllerBase
@@ -111,7 +15,6 @@ namespace backend.Controllers
         [HttpPost]
         public IActionResult Post([FromBody] WorkHourDto dto)
         {
-            // Example: Save a WorkHour to the database (assumes SerialNo is provided in dto)
             using var db = new AppDbContext();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == dto.SerialNo);
             if (product == null)
@@ -147,6 +50,21 @@ namespace backend.Controllers
             return Ok(product);
         }
 
+        // GET: api/WorkHours/all-product-states
+        [HttpGet("all-product-states")]
+        public IActionResult GetAllProductStates()
+        {
+            using var db = new AppDbContext();
+            var products = db.Products.ToList();
+            var result = products.Select(p => new {
+                SerialNo = p.SerialNo,
+                ProjectNo = p.ProjectNo,
+                SystemType = p.SystemType,
+                WorkingProcess = p.WorkingProcess
+            }).ToList();
+            return Ok(result);
+        }
+
         // --- Example CRUD test method (not an API, for demonstration) ---
         public static void CrudTest()
         {
@@ -180,13 +98,5 @@ namespace backend.Controllers
                 db.SaveChanges();
             }
         }
-    }
-
-    public class WorkHourDto
-    {
-        public string? WorkerName { get; set; }
-        public int MainTime { get; set; }
-        public int IssueTime { get; set; }
-        public string? SerialNo { get; set; } // Needed to associate with Product
     }
 }

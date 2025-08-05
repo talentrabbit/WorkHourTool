@@ -1,5 +1,7 @@
 {
   "dependencies": {
-    "vue-router": "^4.5.1"
+    "vue-router": "^4.5.1",
+    "vxe-table": "^4.15.0",
+    "xe-utils": "^3.7.8"
   }
 }
