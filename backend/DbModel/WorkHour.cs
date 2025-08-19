@@ -1,7 +1,9 @@
 using System;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace backend.DbModel
 {
+    [Table("WorkHours")]
     public class WorkHour
     {
         public int Id { get; set; }

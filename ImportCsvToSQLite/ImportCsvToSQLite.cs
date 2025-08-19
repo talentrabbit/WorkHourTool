@@ -9,15 +9,37 @@ class ImportCsvToSQLite
 {
     public static void Main(string[] args)
     {
-        // Usage: ImportCsvToSQLite <TableName> <CsvPath> <DbPath>
-        string tableName = args.Length > 0 ? args[0].ToLower() : "products";
-        string csvPath = args.Length > 1 ? args[1] : "./Products.csv";
-        string dbPath = args.Length > 2 ? args[2] : "../backend/workhour.db";
+        // Validate and parse arguments
+        if (args.Length < 3)
+        {
+            Console.WriteLine("Usage: ImportCsvToSQLite <TableName> <CsvPath> <DbPath>");
+            Console.WriteLine("Example: ImportCsvToSQLite workhours ./WorkHoursDummyData.csv ../backend/workhour.db");
+            return;
+        }
+
+        string tableName = args[0].ToLower();
+        string csvPath = args[1];
+        string dbPath = args[2];
+
+        if (!File.Exists(csvPath))
+        {
+            Console.WriteLine($"Error: CSV file '{csvPath}' does not exist.");
+            return;
+        }
+
+        if (!File.Exists(dbPath))
+        {
+            Console.WriteLine($"Error: Database file '{dbPath}' does not exist.");
+            return;
+        }
 
         AppDbContext.ConnectionString = $"Data Source={dbPath}";
         using var db = new AppDbContext();
         using var reader = new StreamReader(csvPath);
-        using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
+        using var csv = new CsvReader(reader, new CsvHelper.Configuration.CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            PrepareHeaderForMatch = args => args.Header.Trim(), // Trim headers to remove extra spaces
+        });
 
         if (tableName == "products")
         {
@@ -93,7 +115,8 @@ class ImportCsvToSQLite
                     EffectiveHours = rec.EffectiveHours,
                     StartTime = rec.StartTime,
                     EndTime = rec.EndTime,
-                    ProductId = rec.ProductId
+                    ProductId = rec.ProductId,
+                    ProcessName = rec.ProcessName
                 });
                 Console.WriteLine($"Added WorkHour for ProductId={rec.ProductId}");
             }
@@ -134,6 +157,7 @@ class ImportCsvToSQLite
     public class WorkHourCsv
     {
         public string WorkerName { get; set; }
+        public string ProcessName { get; set; }
         public double EffectiveHours { get; set; }
         public DateTime StartTime { get; set; }
         public DateTime EndTime { get; set; }

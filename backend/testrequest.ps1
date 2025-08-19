@@ -14,11 +14,11 @@ $response
 
 # 2. Test GET /api/workhours/product-status/{serialNo}
 Write-Host "Testing GET /api/workhours/product-status/{serialNo}..."
-$serialNo = "SN-001"
+$serialNo = "10005"
 $response = Invoke-RestMethod -Uri "$baseUri/product-status/$serialNo" -Method Get
 $response
 
 # 3. Test GET /api/workhours/all-product-states
-Write-Host "Testing GET /api/workhours/all-product-states..."
-$response = Invoke-RestMethod -Uri "$baseUri/all-product-states" -Method Get
-$response
+# Write-Host "Testing GET /api/workhours/all-product-states..."
+# $response = Invoke-RestMethod -Uri "$baseUri/all-product-states" -Method Get
+# $response
