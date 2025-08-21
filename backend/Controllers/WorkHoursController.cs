@@ -6,6 +6,7 @@ using backend.DbModel;
 using backend.Data;
 using System.IO;
 using System.Text.Json;
+using System.Linq; // added
 
 namespace backend.Controllers
 {
@@ -63,7 +64,7 @@ namespace backend.Controllers
             db.WorkHours.Add(workHour);
             db.SaveChanges();
             _logger.LogInformation("Work hours saved successfully for SerialNo: {SerialNo}", dto.SerialNo);
-            return Ok(new { message = "Work hours saved", data = workHour });
+            return Ok(new { message = "Work hours saved", data = new { workHour.Id, workHour.WorkerName, workHour.EffectiveHours, workHour.StartTime, workHour.EndTime } });
         }
 
         // POST: api/WorkHours/submit-work-hours
@@ -87,7 +88,7 @@ namespace backend.Controllers
             };
             db.WorkHours.Add(workHour);
             db.SaveChanges();
-            return Ok(new { message = "Work hours submitted", data = workHour });
+            return Ok(new { message = "Work hours submitted", data = new { workHour.Id, workHour.WorkerName, workHour.ProcessName, workHour.EffectiveHours, workHour.StartTime, workHour.EndTime } });
         }
 
         // GET: api/WorkHours/product-status/{serialNo}
@@ -177,11 +178,134 @@ namespace backend.Controllers
                     SystemType = w.Product != null ? w.Product.SystemType : null,
                     ProcessName = w.ProcessName,
                     StartTime = w.StartTime,
-                    EndTime = w.EndTime
+                    EndTime = w.EndTime,
+                    CoWorkerName = db.WorkHours
+                        .Where(o => o.ProductId == w.ProductId
+                                    && o.ProcessName == w.ProcessName
+                                    && o.StartTime == w.StartTime
+                                    && o.EndTime == w.EndTime
+                                    && o.WorkerName != w.WorkerName)
+                        .Select(o => o.WorkerName)
+                        .FirstOrDefault()
                 })
                 .ToList();
 
             return Ok(result);
+        }
+
+        // GET: api/WorkHours/all-workhours
+        [HttpGet("all-workhours")]
+        public IActionResult GetAllWorkHours()
+        {
+            using var db = new AppDbContext();
+            var list = db.WorkHours
+                .AsNoTracking()
+                .Include(w => w.Product)
+                .OrderByDescending(w => w.StartTime)
+                .Select(w => new
+                {
+                    Id = w.Id,
+                    SerialNo = w.Product != null ? w.Product.SerialNo : null,
+                    SystemType = w.Product != null ? w.Product.SystemType : null,
+                    WorkerName = w.WorkerName,
+                    ProcessName = w.ProcessName,
+                    EffectiveHours = w.EffectiveHours,
+                    StartTime = w.StartTime,
+                    EndTime = w.EndTime
+                })
+                .ToList();
+            return Ok(list);
+        }
+
+        // GET: api/WorkHours/all-ncmtimes
+        [HttpGet("all-ncmtimes")]
+        public IActionResult GetAllNcmTimes()
+        {
+            using var db = new AppDbContext();
+            var list = db.NcmTimes
+                .AsNoTracking()
+                .Include(n => n.Product)
+                .OrderByDescending(n => n.StartTime)
+                .Select(n => new
+                {
+                    Id = n.Id,
+                    SerialNo = n.Product != null ? n.Product.SerialNo : null,
+                    SystemType = n.Product != null ? n.Product.SystemType : null,
+                    ProcessEngineer = n.ProcessEngineer,
+                    ProcessName = n.ProcessName,
+                    StartTime = n.StartTime,
+                    EndTime = n.EndTime,
+                    NcmHour = (n.EndTime - n.StartTime).TotalHours
+                })
+                .ToList();
+            return Ok(list);
+        }
+
+        // PUT: api/WorkHours/workhours/{id}
+        [HttpPut("workhours/{id:int}")]
+        public IActionResult UpdateWorkHour(int id, [FromBody] UpdateWorkHourDto dto)
+        {
+            using var db = new AppDbContext();
+            var wh = db.WorkHours.FirstOrDefault(x => x.Id == id);
+            if (wh == null)
+            {
+                return NotFound(new { message = $"WorkHour {id} not found" });
+            }
+            if (dto.WorkerName != null) wh.WorkerName = dto.WorkerName;
+            if (dto.ProcessName != null) wh.ProcessName = dto.ProcessName;
+            if (dto.EffectiveHours.HasValue)
+            {
+                if (dto.EffectiveHours.Value < 0) return BadRequest(new { message = "EffectiveHours cannot be negative" });
+                wh.EffectiveHours = dto.EffectiveHours.Value;
+            }
+            db.SaveChanges();
+            return Ok(new { message = "WorkHour updated" });
+        }
+
+        // PUT: api/WorkHours/ncmtimes/{id}
+        [HttpPut("ncmtimes/{id:int}")]
+        public IActionResult UpdateNcmTime(int id, [FromBody] UpdateNcmTimeDto dto)
+        {
+            using var db = new AppDbContext();
+            var nt = db.NcmTimes.FirstOrDefault(x => x.Id == id);
+            if (nt == null)
+            {
+                return NotFound(new { message = $"NcmTime {id} not found" });
+            }
+            if (dto.ProcessName != null) nt.ProcessName = dto.ProcessName;
+            if (dto.ProcessEngineer != null) nt.ProcessEngineer = dto.ProcessEngineer;
+            db.SaveChanges();
+            return Ok(new { message = "NcmTime updated" });
+        }
+
+        // POST: api/WorkHours/workhours/delete-batch
+        [HttpPost("workhours/delete-batch")]
+        public IActionResult DeleteWorkHours([FromBody] IdsRequest req)
+        {
+            if (req?.Ids == null || req.Ids.Length == 0)
+            {
+                return BadRequest(new { message = "No ids provided" });
+            }
+            using var db = new AppDbContext();
+            var entities = db.WorkHours.Where(w => req.Ids.Contains(w.Id)).ToList();
+            db.WorkHours.RemoveRange(entities);
+            var count = db.SaveChanges();
+            return Ok(new { deleted = entities.Count });
+        }
+
+        // POST: api/WorkHours/ncmtimes/delete-batch
+        [HttpPost("ncmtimes/delete-batch")]
+        public IActionResult DeleteNcmTimes([FromBody] IdsRequest req)
+        {
+            if (req?.Ids == null || req.Ids.Length == 0)
+            {
+                return BadRequest(new { message = "No ids provided" });
+            }
+            using var db = new AppDbContext();
+            var entities = db.NcmTimes.Where(n => req.Ids.Contains(n.Id)).ToList();
+            db.NcmTimes.RemoveRange(entities);
+            var count = db.SaveChanges();
+            return Ok(new { deleted = entities.Count });
         }
 
         private class MIProdCommInfo
@@ -199,6 +323,24 @@ namespace backend.Controllers
             public double Hours { get; set; }
             public DateTime StartTime { get; set; }
             public DateTime EndTime { get; set; }
+        }
+
+        public class UpdateWorkHourDto
+        {
+            public string? WorkerName { get; set; }
+            public string? ProcessName { get; set; }
+            public double? EffectiveHours { get; set; }
+        }
+
+        public class UpdateNcmTimeDto
+        {
+            public string? ProcessName { get; set; }
+            public string? ProcessEngineer { get; set; }
+        }
+
+        public class IdsRequest
+        {
+            public int[] Ids { get; set; } = Array.Empty<int>();
         }
     }
 }

@@ -32,7 +32,7 @@ onUnmounted(() => {
 <template>
   <div class="nav-layout">
     <div class="nav-header">
-      <img src="/company-logo.png" alt="Company Trademark" class="company-logo" />
+      <!-- Removed duplicate logo -->
       <div class="nav-header-spacer"></div>
       <!-- <img src="/title-graph.png" alt="Title Graph" class="title-graph" /> -->
     </div>
@@ -77,7 +77,7 @@ onUnmounted(() => {
   }
 .nav-layout { display: flex; flex-direction: column; min-height: 100vh; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
 .nav-header { display: flex; align-items: center; padding: 1em 2em 0.5em 1em; }
-.company-logo { width: 33vw; max-width: 400px; min-width: 120px; height: auto; object-fit: contain; margin-right: 1em; filter: drop-shadow(0 2px 6px rgba(236,102,2,0.3)); }
+.company-logo { display:none; }
 .hero-section h1 { margin: 0; font-size: 2.5em; color: #EC6602; }
 .hero-section p { margin: 0.5em 0 0 0; color: #82451F; font-size: 1.1em; }
 .hero-carousel { width: 100%; height: 340px; margin-bottom: 0.7em; overflow: hidden; border-radius: 16px; box-shadow: 0 4px 16px rgba(236,102,2,0.15); background: #fff4ea; display: flex; align-items: center; justify-content: center; }

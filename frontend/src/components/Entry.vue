@@ -14,6 +14,10 @@
         <span class="icon">🛠️</span>
         <span class="link-text">Worker Entry</span>
       </router-link>
+      <router-link to="/maintenance" class="entry-link attention">
+        <span class="icon">🧰</span>
+        <span class="link-text">WorkHour Maintenance</span>
+      </router-link>
     </div>
   </div>
 </template>
@@ -29,9 +33,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    width: 100vw;
-    background: linear-gradient(135deg, #FFF4E9 0%, #FFFDF9 100%);
+    min-height: 100%;
+    width: 100%;
+    /* background removed to inherit from portal */
     padding: 0;
   }
   .hero {
@@ -41,12 +45,12 @@
     margin-top: 2vw;
     margin-bottom: 2vw;
     width: 60vw;
-    max-width: 900px;
+    max-width: 1200px;
   }
   .hero-img {
-    width: 40vw;
-    max-width: 600px;
-    min-width: 320px;
+    width: 50vw;
+    max-width: 960px;
+    min-width: 480px;
     margin-bottom: 1.2rem;
     border-radius: 18px;
     box-shadow: 0 4px 32px rgba(236, 102, 2, 0.15);
@@ -70,7 +74,7 @@
     margin-top: 3vw;
     justify-content: center;
     width: 60vw;
-    max-width: 900px;
+    max-width: 1200px;
   }
   .entry-link {
     width: 22vw;
