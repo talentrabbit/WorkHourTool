@@ -24,6 +24,17 @@ const router = createRouter({
 
 axios.defaults.baseURL = 'http://localhost:5063';
 
+// Startup parameter: ?devUser=Name or VITE_DEV_USER env
+const urlParams = new URLSearchParams(window.location.search)
+const devUser = urlParams.get('devUser') || import.meta.env.VITE_DEV_USER
+if (devUser) {
+  axios.interceptors.request.use(cfg => {
+    cfg.headers = cfg.headers || {}
+    cfg.headers['X-Dev-User'] = devUser
+    return cfg
+  })
+}
+
 const app = createApp(App)
 app.use(router)
 app.use(VXETable) // Register VXETable plugin

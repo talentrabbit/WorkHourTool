@@ -87,7 +87,8 @@
 
     <div class="all-products-section modern-table">
       <h3>All Systems Production State</h3>
-      <vxe-table :data="allProducts" border stripe round class="modern-vxe-table">
+      <div v-if="allLoading" class="loading">Loading...</div>
+      <vxe-table v-else :data="allProducts" border stripe round class="modern-vxe-table">
         <vxe-column field="serialNo" title="SerialNo" width="120" />
         <vxe-column field="projectNo" title="ProjectNo" width="120" />
         <vxe-column field="systemType" title="SystemType" width="120" />
@@ -119,6 +120,7 @@ const task = ref({
 })
 
 const allProducts = ref([])
+const allLoading = ref(false)
 const workerNames = ref([])
 const processNames = ref([])
 const existingAssignments = ref([])
@@ -215,11 +217,12 @@ watch(existingAssignments, recomputeConflict)
 watch(coWorkerAssignments, recomputeConflict)
 
 async function fetchAllProducts() {
+  allLoading.value = true
   try {
     const res = await axios.get('/api/workhours/all-product-states')
     if (Array.isArray(res.data)) {
       allProducts.value = res.data.map(p => ({
-        serialNo: p.serialNo,  // Notice: using camelCase for consistency
+        serialNo: p.serialNo,
         projectNo: p.projectNo,
         systemType: p.systemType,
         productionState: p.workingProcess,
@@ -233,6 +236,8 @@ async function fetchAllProducts() {
   } catch (error) {
     console.error('Error fetching products:', error)
     allProducts.value = []
+  } finally {
+    allLoading.value = false
   }
 }
 
@@ -446,4 +451,5 @@ const isAssignDisabled = computed(() => {
 .existing-assignments h4 { margin: 1vw 0; font-size: 1.05em; color: #A64E00; }
 .assign-grid .full-row { grid-column: 1 / -1; }
 .assign-grid .col-1-width { justify-self: start; width: calc((100% - 2vw) / 2); }
+.loading { padding: 0.5rem 0.25rem; color: #82451F; font-weight: 600; }
 </style>

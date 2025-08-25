@@ -15,7 +15,7 @@
         <vxe-table :data="workHours" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChange('wh', $event)" @checkbox-all="onCheckChange('wh', $event)">
           <vxe-column type="checkbox" width="50" />
           <vxe-column field="id" title="ID" width="70" />
-          <vxe-column field="serialNo" title="SerialNo" width="140" />
+          <vxe-column field="serialNo" title="SerialNo" width="90" />
           <vxe-column field="systemType" title="SystemType" width="140" />
           <vxe-column field="workerName" title="WorkerName" width="200">
             <template #default="{ row }">
@@ -31,13 +31,21 @@
               </select>
             </template>
           </vxe-column>
-          <vxe-column field="effectiveHours" title="EffectiveHours" width="160">
+          <vxe-column field="effectiveHours" title="EffectiveHours" width="120">
             <template #default="{ row }">
-              <input type="number" step="0.1" min="0" v-model.number="row.effectiveHours" class="cell-input" @input="markChanged('wh', row.id)" />
+              <input type="number" step="0.1" min="0" v-model.number="row.effectiveHours" class="cell-input eh-input" @input="markChanged('wh', row.id)" />
             </template>
           </vxe-column>
-          <vxe-column field="startTime" title="Start Time" width="190" />
-          <vxe-column field="endTime" title="End Time" width="190" />
+          <vxe-column field="startTime" title="Start Time" width="220">
+            <template #default="{ row }">
+              <input type="datetime-local" :value="toLocalInput(row.startTime)" @change="e => onStartChange(row, e.target.value)" class="cell-input" />
+            </template>
+          </vxe-column>
+          <vxe-column field="endTime" title="End Time" width="220">
+            <template #default="{ row }">
+              <input type="datetime-local" :value="toLocalInput(row.endTime)" @change="e => onEndChange(row, e.target.value)" class="cell-input" />
+            </template>
+          </vxe-column>
         </vxe-table>
       </div>
     </section>
@@ -55,7 +63,7 @@
         <vxe-table :data="ncmTimes" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChange('ncm', $event)" @checkbox-all="onCheckChange('ncm', $event)">
           <vxe-column type="checkbox" width="50" />
           <vxe-column field="id" title="ID" width="70" />
-          <vxe-column field="serialNo" title="SerialNo" width="140" />
+          <vxe-column field="serialNo" title="SerialNo" width="90" />
           <vxe-column field="systemType" title="SystemType" width="140" />
           <vxe-column field="processEngineer" title="ProcessEngineer" width="200">
             <template #default="{ row }">
@@ -104,6 +112,27 @@ function onCheckChange(kind, { records }){
 }
 function markChanged(kind, id){ changed[kind].add(id) }
 
+function toLocalInput(dt){
+  if (!dt) return ''
+  const d = new Date(dt)
+  // format yyyy-MM-ddTHH:mm (local)
+  const pad = n => String(n).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  const MM = pad(d.getMonth()+1)
+  const dd = pad(d.getDate())
+  const hh = pad(d.getHours())
+  const mm = pad(d.getMinutes())
+  return `${yyyy}-${MM}-${dd}T${hh}:${mm}`
+}
+function onStartChange(row, value){
+  const iso = new Date(value)
+  if (!isNaN(iso)) { row.startTime = iso.toISOString(); markChanged('wh', row.id) }
+}
+function onEndChange(row, value){
+  const iso = new Date(value)
+  if (!isNaN(iso)) { row.endTime = iso.toISOString(); markChanged('wh', row.id) }
+}
+
 async function loadAll(){
   const [whRes, ncmRes, workersRes, processesRes, engineersRes] = await Promise.all([
     axios.get('/api/workhours/all-workhours'),
@@ -127,7 +156,9 @@ async function saveWorkHours(){
     await axios.put(`/api/workhours/workhours/${id}`, {
       workerName: row.workerName,
       processName: row.processName,
-      effectiveHours: row.effectiveHours
+      effectiveHours: row.effectiveHours,
+      startTime: row.startTime,
+      endTime: row.endTime
     })
   }
   changed.wh.clear()
@@ -174,5 +205,10 @@ onMounted(loadAll)
 .actions{ display:flex; gap: 0.6rem; margin-bottom: 0.8rem; }
 .actions button{ background: linear-gradient(90deg, #EC6602 0%, #FF9D4D 100%); color: #fff; border: none; border-radius: 10px; padding: 0.45rem 1rem; cursor: pointer; font-size: 0.95em; box-shadow: 0 6px 16px rgba(236,102,2,0.25); }
 .actions button:disabled{ opacity: .6; cursor: not-allowed; box-shadow: none; }
-.cell-input{ width: 100%; padding: .35rem .5rem; border: 1px solid #f2c7a6; border-radius: 6px; }
+.cell-input{ width: 95%; padding: .15rem .25rem; border: 1px solid #f2c7a6; border-radius: 6px; }
+.eh-input{ padding: .1rem .1rem; font-size: .9em; height: 2rem; }
+/* remove browser spinners for compact look */
+.eh-input::-webkit-outer-spin-button,
+.eh-input::-webkit-inner-spin-button{ -webkit-appearance: none; margin: 0; }
+.eh-input[type=number]{ appearance: textfield; -moz-appearance: textfield; }
 </style>

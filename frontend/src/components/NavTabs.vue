@@ -1,5 +1,6 @@
 <script setup>
-import { ref, provide, watch } from 'vue'
+import { ref, provide, watch, computed, onMounted, onUnmounted } from 'vue'
+import axios from 'axios'
 import WorkSeat from './WorkSeat.vue'
 import WorkHour from './WorkHour.vue'
 
@@ -19,7 +20,6 @@ function nextHero() {
 }
 
 // Switch hero image every 5 seconds
-import { onMounted, onUnmounted } from 'vue'
 let heroInterval = null
 onMounted(() => {
   heroInterval = setInterval(nextHero, 5000)
@@ -27,6 +27,78 @@ onMounted(() => {
 onUnmounted(() => {
   if (heroInterval) clearInterval(heroInterval)
 })
+
+// Worker-mode detection and data
+const username = ref(localStorage.getItem('username') || 'Guest')
+const workerNames = ref([])
+const isWorker = computed(() => {
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const u = norm(username.value)
+  return workerNames.value.some(w => u.includes(norm(w)))
+})
+const matchedWorkerName = computed(() => {
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const u = norm(username.value)
+  const found = workerNames.value.find(w => u.includes(norm(w)))
+  return found || ''
+})
+
+const todayAssignments = ref([])
+const planningMode = ref('view') // 'view' | 'edit' | 'wait'
+const checkedToday = ref(false)
+
+async function fetchIdentityAndOptions(){
+  try {
+    const res = await axios.get('/api/auth/current-user', { withCredentials: true })
+    if (res?.data?.user) username.value = res.data.user
+  } catch {}
+  try {
+    const workers = await axios.get('/api/workhours/all-worker-names')
+    workerNames.value = Array.isArray(workers.data) ? workers.data : []
+  } catch {}
+}
+
+function overlaps(aStart, aEnd, bStart, bEnd){
+  return Math.max(aStart.getTime(), bStart.getTime()) < Math.min(aEnd.getTime(), bEnd.getTime())
+}
+
+async function checkTodayAssignments(){
+  checkedToday.value = true
+  todayAssignments.value = []
+  const worker = matchedWorkerName.value || username.value
+  if (!worker) { planningMode.value = 'wait'; return }
+  try {
+    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: worker } })
+    const items = Array.isArray(res.data) ? res.data : []
+    const startOfDay = new Date(); startOfDay.setHours(0,0,0,0)
+    const endOfDay = new Date(); endOfDay.setHours(23,59,59,999)
+    const todays = items.filter(a => {
+      const s = new Date(a.startTime)
+      const e = new Date(a.endTime)
+      return overlaps(s, e, startOfDay, endOfDay)
+    })
+    todayAssignments.value = todays
+    if (!todays.length) {
+      if (window.confirm('No work arranged! Add new?')) {
+        planningMode.value = 'edit'
+      } else {
+        planningMode.value = 'wait'
+      }
+    } else {
+      planningMode.value = 'view'
+    }
+  } catch {
+    planningMode.value = 'wait'
+  }
+}
+
+watch([isWorker, activeTab], async ([w, tab]) => {
+  if (w && tab === 'product' && !checkedToday.value) {
+    await checkTodayAssignments()
+  }
+})
+
+onMounted(fetchIdentityAndOptions)
 </script>
 
 <template>
@@ -50,7 +122,28 @@ onUnmounted(() => {
     </div>
     <div class="tab-content">
       <div v-if="activeTab === 'product'">
-        <WorkSeat @start-work-and-switch="handleStartWorkAndSwitch" />
+        <template v-if="isWorker">
+          <div v-if="planningMode === 'view'" class="today-assignment">
+            <h3>Today's Arrangements for {{ matchedWorkerName || username }}</h3>
+            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table">
+              <vxe-column field="serialNo" title="SerialNo" width="120" />
+              <vxe-column field="systemType" title="SystemType" width="140" />
+              <vxe-column field="processName" title="Process" width="160" />
+              <vxe-column field="coWorkerName" title="Co-worker" width="160" />
+              <vxe-column field="startTime" title="Start Time" width="180" />
+              <vxe-column field="endTime" title="End Time" width="180" />
+            </vxe-table>
+          </div>
+          <div v-else-if="planningMode === 'edit'">
+            <WorkSeat />
+          </div>
+          <div v-else class="wait-dim">
+            Wait for arrangement from Production Manager
+          </div>
+        </template>
+        <template v-else>
+          <WorkSeat @start-work-and-switch="handleStartWorkAndSwitch" />
+        </template>
       </div>
 
       <div v-if="activeTab === 'counting'">
@@ -63,7 +156,6 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
-
 
 <style scoped>
 .hero-carousel {
@@ -87,6 +179,7 @@ onUnmounted(() => {
 .nav-tabs-horizontal button:hover { transform: translateY(-1px); }
 .nav-tabs-horizontal button.active { background: #FFFFFF; border: 1px solid #F2C7A6; border-bottom: 2px solid #EC6602; font-weight: 700; color: #A64E00; }
 .tab-content { flex: 1; padding: 2em; background: #fff; border-radius: 0 0 8px 8px; box-shadow: 0 6px 18px rgba(236,102,2,0.12); min-height: 400px; overflow-y: auto; }
+.wait-dim { color: #999; background: #f8f8f8; border: 1px dashed #ddd; padding: 1rem; border-radius: 8px; text-align: center; }
 /* Add styles for product form */
 .product-form {
   max-width: 480px;

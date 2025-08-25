@@ -258,6 +258,12 @@ namespace backend.Controllers
                 if (dto.EffectiveHours.Value < 0) return BadRequest(new { message = "EffectiveHours cannot be negative" });
                 wh.EffectiveHours = dto.EffectiveHours.Value;
             }
+            if (dto.StartTime.HasValue) wh.StartTime = dto.StartTime.Value;
+            if (dto.EndTime.HasValue) wh.EndTime = dto.EndTime.Value;
+            if (wh.EndTime <= wh.StartTime)
+            {
+                return BadRequest(new { message = "EndTime must be after StartTime" });
+            }
             db.SaveChanges();
             return Ok(new { message = "WorkHour updated" });
         }
@@ -330,6 +336,8 @@ namespace backend.Controllers
             public string? WorkerName { get; set; }
             public string? ProcessName { get; set; }
             public double? EffectiveHours { get; set; }
+            public DateTime? StartTime { get; set; }
+            public DateTime? EndTime { get; set; }
         }
 
         public class UpdateNcmTimeDto

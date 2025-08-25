@@ -13,9 +13,9 @@
     <div class="portal-body">
       <aside class="portal-nav">
         <nav>
-          <router-link to="/planning" class="nav-link" active-class="active">Production Planning</router-link>
+          <router-link v-if="!isWorker" to="/planning" class="nav-link" active-class="active">Production Planning</router-link>
           <router-link to="/worker" class="nav-link" active-class="active">Work Hour Tool</router-link>
-          <router-link to="/maintenance" class="nav-link" active-class="active">WorkHour Maintenance</router-link>
+          <router-link v-if="!isWorker" to="/maintenance" class="nav-link" active-class="active">WorkHour Maintenance</router-link>
         </nav>
       </aside>
       <main class="portal-content">
@@ -29,10 +29,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 import logoUrl from '../company-logo.png?url'
 const username = ref(localStorage.getItem('username') || 'Guest')
+const workerNames = ref([])
+const isWorker = computed(() => {
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const u = norm(username.value)
+  return workerNames.value.some(w => u.includes(norm(w)))
+})
 
 onMounted(async () => {
   try {
@@ -40,9 +46,11 @@ onMounted(async () => {
     if (res?.data?.user) {
       username.value = res.data.user
     }
-  } catch (e) {
-    // ignore, fallback to local storage / Guest
-  }
+  } catch {}
+  try {
+    const workers = await axios.get('/api/workhours/all-worker-names')
+    workerNames.value = Array.isArray(workers.data) ? workers.data : []
+  } catch {}
 })
 </script>
 
