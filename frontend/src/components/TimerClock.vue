@@ -1,5 +1,6 @@
 <script setup>
-import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef } from 'vue'
+import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch } from 'vue'
+import axios from 'axios'
 // Sync timer state with parent for disabling tabs
 const isCountingTimerActive = inject('isCountingTimerActive', null)
 
@@ -8,7 +9,6 @@ const props = defineProps({
   process: { type: String, default: 'Assembly' },
   workSeat: { type: String, default: 'WS-02' }
 })
-
 // Use toRef so prop updates from parent remain reactive
 const serialNo = toRef(props, 'serialNo')
 const process = toRef(props, 'process')
@@ -26,21 +26,76 @@ function hoursToHHMM(hours) {
   return `${h}:${m.toString().padStart(2, '0')}`
 }
 
+// fetch aggregates for current serial
+async function fetchAggregates() {
+  if (!serialNo.value) return
+  try {
+    const [whRes, ntRes] = await Promise.all([
+      axios.get(`/api/WorkHours/workhours-by-system/${encodeURIComponent(serialNo.value)}`),
+      axios.get(`/api/WorkHours/ncmtimes-by-system/${encodeURIComponent(serialNo.value)}`)
+    ])
+    const whList = Array.isArray(whRes.data) ? whRes.data : []
+    const ntList = Array.isArray(ntRes.data) ? ntRes.data : []
+    const totalEffective = whList.reduce((sum, w) => sum + (Number(w.EffectiveHours ?? w.effectiveHours ?? 0) || 0), 0)
+    workHourOverall.value = hoursToHHMM(totalEffective)
+    const totalNcm = ntList.reduce((sum, n) => sum + (Number(n.NcmHour ?? n.ncmHour ?? 0) || 0), 0)
+    if (totalNcm != null) ncmHours.value = hoursToHHMM(totalNcm)
+  } catch (err) {
+    console.error('Failed to fetch aggregates for serial', serialNo.value, err)
+  }
+}
+
 // Example static info (replace with props or API data as needed)
+
 const workTime = ref(0) // seconds
 const ncmTime = ref(0) // seconds
 const activeClock = ref('') // 'work' or 'ncm' or ''
 let timer = null
+const currentWorkHourId = ref(null)
 
 
 // Start overall timer on mount, clean up on unmount
 onMounted(() => {
-    isCountingTimerActive.value = true
+    if (isCountingTimerActive) isCountingTimerActive.value = true
+    void fetchAggregates()
 })
 onBeforeUnmount(() => {
-  isCountingTimerActive.value = false
+  if (isCountingTimerActive) isCountingTimerActive.value = false
 })
 
+
+async function setWorkingBackend() {
+  try {
+    const workerName = (username && username.value) ? username.value : 'Guest'
+    // Resolve product id by serial number
+    const pRes = await axios.get(`/api/WorkHours/product-status/${encodeURIComponent(serialNo.value)}`)
+    const product = pRes?.data
+    const productId = product?.id ?? product?.Id ?? null
+    if (!productId) {
+      console.warn('ProductId not found for serial', serialNo.value)
+      return null
+    }
+    const payload = {
+      ProductId: productId,
+      ProcessName: process.value,
+      WorkerName: workerName
+    }
+    const res = await axios.post('/api/WorkHours/set-working', payload)
+    const id = res?.data?.id ?? null
+    if (id) currentWorkHourId.value = id
+    console.log('Set working response', res.data)
+    return id
+  } catch (err) {
+    console.error('Failed to set working state', err)
+    return null
+  }
+}
+
+async function ensureWorkHourId() {
+  if (currentWorkHourId.value) return currentWorkHourId.value
+  const id = await setWorkingBackend()
+  return id
+}
 
 function startClock(type) {
   // If clicking the active clock, pause it
@@ -59,6 +114,12 @@ function startClock(type) {
     if (activeClock.value === 'work') workTime.value++
     else if (activeClock.value === 'ncm') ncmTime.value++
   }, 1000)
+
+  // If starting the work clock, notify backend to set state to Working
+  if (type === 'work') {
+    // fire-and-forget
+    void setWorkingBackend()
+  }
 }
 
 // stopClock removed
@@ -70,26 +131,66 @@ function formatTime(sec) {
   return `${h}:${m}:${s}`
 }
 
-function submitWorkHours() {
-  // Placeholder for submit logic
-  alert('Work hours submitted!');
+async function submitWorkHours() {
+  // Mark current work hour as Completed, set EndTimeActual to now
+  try {
+    const id = await ensureWorkHourId()
+    if (!id) {
+      alert('No WorkHour record found to complete')
+      return
+    }
+    const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest' }
+    const res = await axios.post('/api/WorkHours/complete', payload)
+    console.log('Complete response', res.data)
+    // stop timer locally
+    if (timer) clearInterval(timer)
+    timer = null
+    activeClock.value = ''
+    if (isCountingTimerActive) isCountingTimerActive.value = false
+    alert('Work hour completed.')
+    // Optionally clear currentWorkHourId so next start will create/find a new record
+    currentWorkHourId.value = null
+  } catch (err) {
+    console.error('Failed to complete work hour', err)
+    alert('Failed to complete work hour')
+  }
 }
 
-function resetClocks() {
+async function resetClocks() {
   const password = prompt('Enter password to reset all clocks:')
   // Hardcoded password for now; move to backend later
   const correctPassword = 'reset';
   if (password === correctPassword) {
+    try {
+      // If we have a current WorkHour, reset it on backend
+      let id = currentWorkHourId.value
+      if (!id) {
+        // attempt to resolve one (will set to Working briefly)
+        id = await setWorkingBackend()
+      }
+      if (id) {
+        await axios.post('/api/WorkHours/reset', { WorkHourId: id })
+        console.log('Reset workhour', id)
+      }
+    } catch (err) {
+      console.error('Failed to reset workhour', err)
+    }
     workTime.value = 0
     ncmTime.value = 0
     activeClock.value = ''
     if (isCountingTimerActive) isCountingTimerActive.value = false
     if (timer) clearInterval(timer)
+    currentWorkHourId.value = null
     alert('Clocks have been reset.')
   } else if (password !== null) {
     alert('Incorrect password. Reset cancelled.')
   }
 }
+
+// call on mount and when serial changes
+watch(serialNo, (nv) => {
+  void fetchAggregates()
+})
 </script>
 
 <template>
@@ -111,12 +212,12 @@ function resetClocks() {
       <div class="clock-block">
         <div class="clock-label">Effective Working Time</div>
         <div class="clock-time" :class="{active: activeClock === 'work'}">{{ formatTime(workTime) }}</div>
-        <button class="circle-wide-btn" :class="{active: activeClock === 'work'}" @click="startClock('work')" title="Work">W</button>
+        <button class="circle-wide-btn" :class="{active: activeClock === 'work'}" @click="startClock('work')" title="Work">Work</button>
       </div>
       <div class="clock-block">
         <div class="clock-label">NCM Time</div>
         <div class="clock-time" :class="{active: activeClock === 'ncm'}">{{ formatTime(ncmTime) }}</div>
-        <button class="circle-wide-btn" :class="[{active: activeClock === 'ncm'}, {'ncm-active': activeClock === 'ncm'}]" @click="startClock('ncm')" title="NCM">N</button>
+        <button class="circle-wide-btn" :class="[{active: activeClock === 'ncm'}, {'ncm-active': activeClock === 'ncm'}]" @click="startClock('ncm')" title="NCM">NCM</button>
       </div>
     </div>
     <div class="reset-btn-row">

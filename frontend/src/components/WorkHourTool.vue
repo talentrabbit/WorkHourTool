@@ -1,13 +1,16 @@
 <script setup>
-import { ref, provide, watch, computed, onMounted, onUnmounted } from 'vue'
+import { ref, provide, watch, computed, onMounted, onUnmounted, inject } from 'vue'
 import axios from 'axios'
 import WorkSeat from './WorkSeat.vue'
-import WorkHour from './WorkHour.vue'
+import TimerClock from './TimerClock.vue'
 
-const activeTab = ref('product')
+const activeTab = ref('task')
 // Shared state for timer running
 const isCountingTimerActive = ref(false)
 provide('isCountingTimerActive', isCountingTimerActive)
+
+// selected serial from assignments
+const selectedSerial = ref('')
 
 const heroImages = [
   '/HeroSection/factory1.jpg',
@@ -29,7 +32,7 @@ onUnmounted(() => {
 })
 
 // Worker-mode detection and data
-const username = ref(localStorage.getItem('username') || 'Guest')
+const username = inject('username', ref('Guest'))
 const workerNames = ref([])
 const isWorker = computed(() => {
   const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -47,11 +50,7 @@ const todayAssignments = ref([])
 const planningMode = ref('view') // 'view' | 'edit' | 'wait'
 const checkedToday = ref(false)
 
-async function fetchIdentityAndOptions(){
-  try {
-    const res = await axios.get('/api/auth/current-user', { withCredentials: true })
-    if (res?.data?.user) username.value = res.data.user
-  } catch {}
+async function fetchOptions(){
   try {
     const workers = await axios.get('/api/workhours/all-worker-names')
     workerNames.value = Array.isArray(workers.data) ? workers.data : []
@@ -92,13 +91,20 @@ async function checkTodayAssignments(){
   }
 }
 
+function onAssignmentClick(params) {
+  const row = params?.row || params
+  if (row?.serialNo) selectedSerial.value = row.serialNo
+}
+
 watch([isWorker, activeTab], async ([w, tab]) => {
-  if (w && tab === 'product' && !checkedToday.value) {
+  if (w && tab === 'task' && !checkedToday.value) {
     await checkTodayAssignments()
   }
 })
 
-onMounted(fetchIdentityAndOptions)
+onMounted(() => {
+  fetchOptions()
+})
 </script>
 
 <template>
@@ -116,16 +122,16 @@ onMounted(fetchIdentityAndOptions)
       <p>Track, analyze, and improve your department's productivity.</p>
     </div>
     <div class="nav-tabs-horizontal">
-      <button :class="{active: activeTab === 'product'}" @click="activeTab = 'product'">Work Hours Planning</button>
+      <button :class="{active: activeTab === 'task'}" @click="activeTab = 'task'">Task Arrangement</button>
       <button :class="{active: activeTab === 'counting'}" @click="activeTab = 'counting'">Work Hour Counting Tool</button>
       <button :class="{active: activeTab === 'intro'}" @click="activeTab = 'intro'">Department Introduction</button>
     </div>
     <div class="tab-content">
-      <div v-if="activeTab === 'product'">
+      <div v-if="activeTab === 'task'">
         <template v-if="isWorker">
           <div v-if="planningMode === 'view'" class="today-assignment">
             <h3>Today's Arrangements for {{ matchedWorkerName || username }}</h3>
-            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table">
+            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table" @row-click="onAssignmentClick">
               <vxe-column field="serialNo" title="SerialNo" width="120" />
               <vxe-column field="systemType" title="SystemType" width="140" />
               <vxe-column field="processName" title="Process" width="160" />
@@ -141,13 +147,10 @@ onMounted(fetchIdentityAndOptions)
             Wait for arrangement from Production Manager
           </div>
         </template>
-        <template v-else>
-          <WorkSeat @start-work-and-switch="handleStartWorkAndSwitch" />
-        </template>
       </div>
 
       <div v-if="activeTab === 'counting'">
-        <WorkHour />
+        <TimerClock />
       </div>
       <div v-if="activeTab === 'intro'">
         <h2>Department Self-Introduction</h2>
@@ -173,7 +176,7 @@ onMounted(fetchIdentityAndOptions)
 .hero-section h1 { margin: 0; font-size: 2.5em; color: #EC6602; }
 .hero-section p { margin: 0.5em 0 0 0; color: #82451F; font-size: 1.1em; }
 .hero-carousel { width: 100%; height: 340px; margin-bottom: 0.7em; overflow: hidden; border-radius: 16px; box-shadow: 0 4px 16px rgba(236,102,2,0.15); background: #fff4ea; display: flex; align-items: center; justify-content: center; }
-.hero-img { width: 100%; height: 100%; object-fit: cover; transition: opacity 0.5s; }
+.hero-img { width: 75%; height: 15%; object-fit: cover; transition: opacity 0.5s; }
 .nav-tabs-horizontal { display: flex; gap: 1em; background: #FFF0E4; padding: 0.5em 1em; border-bottom: 1px solid #F2C7A6; box-shadow: inset 0 -1px 0 #F2C7A6; }
 .nav-tabs-horizontal button { padding: 0.75em 1.5em; border: none; background: #FFE6D3; cursor: pointer; border-radius: 8px 8px 0 0; font-size: 1em; color: #82451F; box-shadow: 0 2px 6px rgba(236,102,2,0.12); transition: transform 0.1s; }
 .nav-tabs-horizontal button:hover { transform: translateY(-1px); }
@@ -213,13 +216,10 @@ onMounted(fetchIdentityAndOptions)
   background: #42b883;
   color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px 8px 0 0;
   font-size: 1em;
-  cursor: pointer;
-  font-weight: bold;
-  transition: background 0.2s;
+  color: #82451F;
+  box-shadow: 0 2px 6px rgba(236,102,2,0.12);
 }
-.start-work-btn:hover {
-  background: #36976b;
-}
+.start-work-btn:hover { transform: translateY(-1px); }
 </style>

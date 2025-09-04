@@ -123,6 +123,53 @@ class ImportCsvToSQLite
             db.SaveChanges();
             Console.WriteLine($"Imported {records.Count} WorkHours from '{csvPath}' into database '{dbPath}'.");
         }
+        else if (tableName == "users")
+        {
+            var records = csv.GetRecords<UserCsv>().ToList();
+            foreach (var rec in records)
+            {
+                // normalize fields
+                var gidText = (rec.Gid ?? string.Empty).Trim();
+                var fullName = (rec.FullName ?? string.Empty).Trim();
+                var mail = (rec.Mail ?? string.Empty).Trim();
+                var role = (rec.Role ?? string.Empty).Trim();
+
+                User? existing = null;
+                if (!string.IsNullOrWhiteSpace(mail))
+                {
+                    existing = db.Users.FirstOrDefault(u => u.Mail == mail);
+                }
+                if (existing == null && !string.IsNullOrWhiteSpace(gidText))
+                {
+                    existing = db.Users.FirstOrDefault(u => u.Gid == gidText);
+                }
+                if (existing == null && !string.IsNullOrWhiteSpace(fullName))
+                {
+                    existing = db.Users.FirstOrDefault(u => u.FullName == fullName);
+                }
+
+                if (existing != null)
+                {
+                    existing.FullName = fullName;
+                    existing.Mail = mail;
+                    existing.Role = role;
+                    Console.WriteLine($"Updated User: Mail={mail} FullName={fullName}");
+                }
+                else
+                {
+                    db.Users.Add(new User
+                    {
+                        FullName = fullName,
+                        Mail = mail,
+                        Role = role,
+                        Gid = gidText
+                    });
+                    Console.WriteLine($"Added User: Mail={mail} FullName={fullName}");
+                }
+            }
+            db.SaveChanges();
+            Console.WriteLine($"Imported {records.Count} users from '{csvPath}' into database '{dbPath}'.");
+        }
         else
         {
             Console.WriteLine($"Unsupported table: {tableName}");
@@ -162,5 +209,13 @@ class ImportCsvToSQLite
         public DateTime StartTime { get; set; }
         public DateTime EndTime { get; set; }
         public int ProductId { get; set; }
+    }
+
+    public class UserCsv
+    {
+        public string? Gid { get; set; }
+        public string FullName { get; set; }
+        public string Mail { get; set; }
+        public string Role { get; set; }
     }
 }

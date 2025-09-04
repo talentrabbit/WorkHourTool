@@ -14,5 +14,12 @@ namespace backend.DbModel
         public DateTime EndTime { get; set; }
         public int ProductId { get; set; }
         public Product? Product { get; set; }
+
+        // State of the work hour: NotStarted, Working, Completed, etc.
+        public string State { get; set; } = "NotStarted";
+
+        // Actual start/end times which may differ from scheduled StartTime/EndTime
+        public DateTime? StartTimeActual { get; set; }
+        public DateTime? EndTimeActual { get; set; }
     }
 }

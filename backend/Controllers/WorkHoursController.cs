@@ -108,6 +108,67 @@ namespace backend.Controllers
             return Ok(product);
         }
 
+        // GET: api/WorkHours/workhours-by-system/{serialNo}
+        [HttpGet("workhours-by-system/{serialNo}")]
+        public IActionResult GetWorkHoursBySystem(string serialNo)
+        {
+            using var db = new AppDbContext();
+            var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
+            if (product == null) return NotFound(new { message = "Product not found" });
+
+            var list = db.WorkHours
+                .AsNoTracking()
+                .Include(w => w.Product)
+                .Where(w => w.ProductId == product.Id)
+                .OrderByDescending(w => w.StartTime)
+                .Select(w => new
+                {
+                    Id = w.Id,
+                    SerialNo = product.SerialNo,
+                    WorkerName = w.WorkerName,
+                    ProcessName = w.ProcessName,
+                    EffectiveHours = w.EffectiveHours,
+                    StartTime = w.StartTime,
+                    EndTime = w.EndTime,
+                    State = w.State,
+                    StartTimeActual = w.StartTimeActual,
+                    EndTimeActual = w.EndTimeActual
+                })
+                .ToList();
+
+            return Ok(list);
+        }
+
+        // GET: api/WorkHours/ncmtimes-by-system/{serialNo}
+        [HttpGet("ncmtimes-by-system/{serialNo}")]
+        public IActionResult GetNcmTimesBySystem(string serialNo)
+        {
+            using var db = new AppDbContext();
+            var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
+            if (product == null) return NotFound(new { message = "Product not found" });
+
+            var list = db.NcmTimes
+                .AsNoTracking()
+                .Include(n => n.Product)
+                .Where(n => n.ProductId == product.Id)
+                .OrderByDescending(n => n.StartTime)
+                .Select(n => new
+                {
+                    Id = n.Id,
+                    SerialNo = product.SerialNo,
+                    ProcessEngineer = n.ProcessEngineer,
+                    ProcessName = n.ProcessName,
+                    StartTime = n.StartTime,
+                    EndTime = n.EndTime,
+                    NcmHour = (n.EndTime - n.StartTime).TotalHours,
+                    State = n.State,
+                    NcmAction = n.NcmAction
+                })
+                .ToList();
+
+            return Ok(list);
+        }
+
         // GET: api/WorkHours/all-product-states
         [HttpGet("all-product-states")]
         public IActionResult GetAllProductStates()
@@ -284,34 +345,79 @@ namespace backend.Controllers
             return Ok(new { message = "NcmTime updated" });
         }
 
-        // POST: api/WorkHours/workhours/delete-batch
-        [HttpPost("workhours/delete-batch")]
-        public IActionResult DeleteWorkHours([FromBody] IdsRequest req)
+        // POST: api/WorkHours/set-working
+        [HttpPost("set-working")]
+        public IActionResult SetWorking([FromBody] SetWorkingRequest req)
         {
-            if (req?.Ids == null || req.Ids.Length == 0)
-            {
-                return BadRequest(new { message = "No ids provided" });
-            }
+            if (req == null) return BadRequest(new { message = "Request body required" });
+            if (string.IsNullOrWhiteSpace(req.WorkerName)) return BadRequest(new { message = "WorkerName is required" });
+
             using var db = new AppDbContext();
-            var entities = db.WorkHours.Where(w => req.Ids.Contains(w.Id)).ToList();
-            db.WorkHours.RemoveRange(entities);
-            var count = db.SaveChanges();
-            return Ok(new { deleted = entities.Count });
+            WorkHour? target = null;
+
+            if (req.WorkHourId.HasValue)
+            {
+                target = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId.Value);
+            }
+            else if (req.ProductId.HasValue && !string.IsNullOrWhiteSpace(req.ProcessName))
+            {
+                // prefer a record with same worker name if available, otherwise the most recent one for that product/process
+                target = db.WorkHours
+                    .Where(w => w.ProductId == req.ProductId.Value && w.ProcessName == req.ProcessName)
+                    .OrderByDescending(w => w.StartTime)
+                    .FirstOrDefault(w => string.Equals(w.WorkerName ?? string.Empty, req.WorkerName, StringComparison.OrdinalIgnoreCase))
+                    ?? db.WorkHours
+                        .Where(w => w.ProductId == req.ProductId.Value && w.ProcessName == req.ProcessName)
+                        .OrderByDescending(w => w.StartTime)
+                        .FirstOrDefault();
+            }
+
+            if (target == null)
+            {
+                return NotFound(new { message = "No matching WorkHour record found" });
+            }
+
+            target.State = "Working";
+            // ensure WorkerName is set to the actor
+            target.WorkerName = req.WorkerName;
+            // if actual start not set, set it to now
+            if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.UtcNow;
+            db.SaveChanges();
+
+            return Ok(new { message = "WorkHour state updated", id = target.Id, state = target.State, workerName = target.WorkerName });
         }
 
-        // POST: api/WorkHours/ncmtimes/delete-batch
-        [HttpPost("ncmtimes/delete-batch")]
-        public IActionResult DeleteNcmTimes([FromBody] IdsRequest req)
+        // POST: api/WorkHours/complete
+        [HttpPost("complete")]
+        public IActionResult CompleteWorkHour([FromBody] CompleteWorkHourRequest req)
         {
-            if (req?.Ids == null || req.Ids.Length == 0)
-            {
-                return BadRequest(new { message = "No ids provided" });
-            }
+            if (req == null) return BadRequest(new { message = "Request body required" });
             using var db = new AppDbContext();
-            var entities = db.NcmTimes.Where(n => req.Ids.Contains(n.Id)).ToList();
-            db.NcmTimes.RemoveRange(entities);
-            var count = db.SaveChanges();
-            return Ok(new { deleted = entities.Count });
+            var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
+            if (wh == null) return NotFound(new { message = "WorkHour not found" });
+
+            wh.State = "Completed";
+            wh.EndTimeActual = DateTime.UtcNow;
+            // optionally update WorkerName
+            if (!string.IsNullOrWhiteSpace(req.WorkerName)) wh.WorkerName = req.WorkerName;
+            db.SaveChanges();
+            return Ok(new { message = "WorkHour completed", id = wh.Id, endTimeActual = wh.EndTimeActual });
+        }
+
+        // POST: api/WorkHours/reset
+        [HttpPost("reset")]
+        public IActionResult ResetWorkHour([FromBody] ResetWorkHourRequest req)
+        {
+            if (req == null) return BadRequest(new { message = "Request body required" });
+            using var db = new AppDbContext();
+            var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
+            if (wh == null) return NotFound(new { message = "WorkHour not found" });
+
+            wh.State = "NotStarted";
+            wh.StartTimeActual = null;
+            wh.EndTimeActual = null;
+            db.SaveChanges();
+            return Ok(new { message = "WorkHour reset", id = wh.Id });
         }
 
         private class MIProdCommInfo
@@ -349,6 +455,25 @@ namespace backend.Controllers
         public class IdsRequest
         {
             public int[] Ids { get; set; } = Array.Empty<int>();
+        }
+
+        public class SetWorkingRequest
+        {
+            public int? WorkHourId { get; set; }
+            public int? ProductId { get; set; }
+            public string? ProcessName { get; set; }
+            public string WorkerName { get; set; } = string.Empty;
+        }
+
+        public class CompleteWorkHourRequest
+        {
+            public int WorkHourId { get; set; }
+            public string? WorkerName { get; set; }
+        }
+
+        public class ResetWorkHourRequest
+        {
+            public int WorkHourId { get; set; }
         }
     }
 }

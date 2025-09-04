@@ -2,8 +2,8 @@ import { createApp } from 'vue'
 import './style.css'
 import App from './App.vue'
 import { createRouter, createWebHistory } from 'vue-router'
-import Entry from './components/Entry.vue'
-import NavTabs from './components/NavTabs.vue'
+import Main from './components/Main.vue'
+import WorkHourTool from './components/WorkHourTool.vue'
 import Planning from './components/Planning.vue'
 import WorkHourMaintenance from './components/WorkHourMaintenance.vue'
 import VXETable from 'vxe-table'
@@ -11,8 +11,9 @@ import 'vxe-table/lib/style.css'
 import axios from 'axios';
 
 const routes = [
-  { path: '/', component: Entry },
-  { path: '/worker', component: NavTabs },
+  { path: '/', component: Main },
+  { path: '/main', component: Main },
+  { path: '/worker', component: WorkHourTool },
   { path: '/planning', component: Planning },
   { path: '/maintenance', component: WorkHourMaintenance }
 ]
@@ -22,7 +23,7 @@ const router = createRouter({
   routes
 })
 
-axios.defaults.baseURL = 'http://localhost:5063';
+axios.defaults.baseURL = 'http://shai571a:5063';
 
 // Startup parameter: ?devUser=Name or VITE_DEV_USER env
 const urlParams = new URLSearchParams(window.location.search)

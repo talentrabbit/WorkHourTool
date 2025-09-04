@@ -7,20 +7,38 @@
       </div>
       <div class="header-title">SSME MI Digital Factory</div>
       <div class="header-right">
-        <div class="user-info">Signed in as {{ username }}</div>
+        <div class="user-info">{{ username }}</div>
+        <button v-if="username === 'Guest'" class="signin-btn" @click="openLogon" title="Sign in">Sign in</button>
+        <button v-else class="signout-btn" @click="doSignOut" title="Sign out">Sign out</button>
       </div>
     </header>
     <div class="portal-body">
-      <aside class="portal-nav">
+      <aside  class="portal-nav">
         <nav>
-          <router-link v-if="!isWorker" to="/planning" class="nav-link" active-class="active">Production Planning</router-link>
-          <router-link to="/worker" class="nav-link" active-class="active">Work Hour Tool</router-link>
-          <router-link v-if="!isWorker" to="/maintenance" class="nav-link" active-class="active">WorkHour Maintenance</router-link>
+          <router-link v-if="isAdmin || isManager" to="/planning" class="nav-link" active-class="active">Production Planning</router-link>
+          <router-link v-if="isWorker || isAdmin" to="/worker" class="nav-link" active-class="active">Work Hour Tool</router-link>
+          <router-link v-if="isAdmin || isManager" to="/maintenance" class="nav-link" active-class="active">WorkHour Maintenance</router-link>
         </nav>
       </aside>
       <main class="portal-content">
         <router-view />
       </main>
+
+      <!-- Logon overlay: dims the portal-body until the user signs in -->
+      <div v-if="overlayVisible" class="logon-overlay" role="dialog" aria-modal="true">
+        <!-- show modal when actively logging on, otherwise keep the translucent shim to dim the body -->
+        <div v-if="showLogon" class="logon-modal">
+          <h2>Sign in</h2>
+          <p class="logon-desc">Enter your account (DOMAIN\\username or username) to continue.</p>
+          <input v-model="logonName" class="logon-input" placeholder="DOMAIN\\username or username" @keyup.enter="doLogon" />
+          <div class="logon-actions">
+            <button class="btn" @click="doLogon">Log in</button>
+            <button class="btn" style="background:#fff;color:#82451F;border:1px solid #E6C9B0;margin-left:12px" @click="doCancel">Cancel</button>
+          </div>
+        </div>
+        <div v-else class="logon-shim" aria-hidden="true"></div>
+      </div>
+
     </div>
     <footer class="portal-footer">
       <span>© 2025 SSME MI • Internal Portal</span>
@@ -29,24 +47,99 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, provide, watch } from 'vue'
 import axios from 'axios'
 import logoUrl from '../company-logo.png?url'
+
 const username = ref(localStorage.getItem('username') || 'Guest')
+const userRole = ref(localStorage.getItem('userRole') || '')
+provide('username', username)
+provide('userRole', userRole)
+
 const workerNames = ref([])
-const isWorker = computed(() => {
-  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  const u = norm(username.value)
-  return workerNames.value.some(w => u.includes(norm(w)))
+
+// Role-derived flags
+const isWorker = computed(() => (userRole.value || '').toLowerCase() === 'worker')
+const isManager = computed(() => (userRole.value || '').toLowerCase() === 'productionmanager')
+const isAdmin = computed(() => (userRole.value || '').toLowerCase() === 'administrator')
+
+// Logon UI state
+const logonName = ref('')
+const allowGuest = ref(false)
+const showLogon = ref(username.value === 'Guest' && !allowGuest.value)
+const overlayVisible = computed(() => showLogon.value || allowGuest.value)
+
+function applyUserFromResponse(data) {
+  if (!data) return
+  username.value = data.fullName || data.user || data.gid || 'Guest'
+  userRole.value = data.role || (Array.isArray(data.roles) && data.roles[0]) || ''
+  try { localStorage.setItem('username', username.value) } catch {}
+  try { localStorage.setItem('userRole', userRole.value) } catch {}
+}
+
+async function doLogon() {
+  const v = (logonName.value || '').trim()
+  if (!v) return
+  try {
+    const res = await axios.get('/api/auth/find-user', { params: { q: v } })
+    if (res?.data) {
+      applyUserFromResponse(res.data)
+      showLogon.value = false
+      allowGuest.value = false
+      return
+    }
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      alert('No matching user found')
+      return
+    }
+    console.error(err)
+    alert('Failed to look up user')
+    return
+  }
+}
+
+function doSignOut() {
+  try { localStorage.removeItem('username') } catch {}
+  try { localStorage.removeItem('userRole') } catch {}
+  username.value = 'Guest'
+  userRole.value = ''
+  allowGuest.value = false
+  showLogon.value = true
+}
+
+function doCancel() {
+  allowGuest.value = true
+  showLogon.value = false
+}
+
+function openLogon() {
+  allowGuest.value = false
+  logonName.value = ''
+  showLogon.value = true
+}
+
+watch(username, (nv) => {
+  showLogon.value = (!nv || nv === 'Guest') && !allowGuest.value
 })
 
 onMounted(async () => {
+  // trigger Negotiate handshake first (non-blocking)
   try {
-    const res = await axios.get('/api/auth/current-user', { withCredentials: true })
-    if (res?.data?.user) {
-      username.value = res.data.user
-    }
+    await axios.get('/api/auth/challenge')
   } catch {}
+
+  // Attempt to read current-user (may be anonymous)
+  try {
+    const res = await axios.get('/api/auth/current-user')
+    if (res?.data?.user) {
+      applyUserFromResponse(res.data)
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // load worker names for legacy matching if needed
   try {
     const workers = await axios.get('/api/workhours/all-worker-names')
     workerNames.value = Array.isArray(workers.data) ? workers.data : []
@@ -56,7 +149,17 @@ onMounted(async () => {
 
 <style scoped>
 /* Root: fixed to viewport 16:9, scalable */
-.portal { width: 100vw; height: 100vh; display: flex; flex-direction: column; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
+.portal {
+  width: 100vw;
+  max-width: 1920px; /* constrain to target desktop width */
+  height: 100vh;
+  margin: 0 auto; /* center on wide displays */
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);
+  box-sizing: border-box;
+  overflow: hidden;
+}
 
 /* Header */
 .portal-header { height: 72px; min-height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: #FFFFFF; border-bottom: 1px solid #F2C7A6; box-shadow: 0 2px 8px rgba(236,102,2,0.08); }
@@ -66,18 +169,46 @@ onMounted(async () => {
 .header-title { font-size: 1.25rem; font-weight: 800; color: #EC6602; letter-spacing: 0.02em; }
 .header-right { display: flex; align-items: center; gap: 16px; }
 .user-info { color: #82451F; font-weight: 600; background: #FFF3E8; border: 1px solid #F2C7A6; padding: 6px 10px; border-radius: 8px; }
+.signout-btn { margin-left: 12px; background: transparent; border: 1px solid #E6C9B0; color: #82451F; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.signin-btn { margin-left: 12px; background: #EC6602; border: none; color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.signin-btn:hover { opacity: 0.95 }
 
 /* Body */
-.portal-body { flex: 1; display: flex; min-height: 0; }
-.portal-nav { width: 260px; min-width: 240px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 16px 10px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
+.portal-body { flex: 1; display: flex; min-height: 0; width: 100%; position: relative; }
+.portal-nav { width: 260px; min-width: 220px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 16px 10px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
 .portal-nav nav { display: flex; flex-direction: column; gap: 8px; }
 .nav-link { display: block; padding: 10px 12px; color: #82451F; text-decoration: none; border-radius: 8px; background: #FFE6D3; box-shadow: 0 1px 4px rgba(236,102,2,0.08); font-weight: 600; }
 .nav-link:hover { transform: translateY(-1px); background: #FFD9BB; }
 .nav-link.active { background: #FFFFFF; border: 1px solid #F2C7A6; color: #A64E00; }
 
 /* Main Content */
-.portal-content { flex: 1; min-width: 0; padding: 16px; overflow: auto; }
+.portal-content { flex: 1; min-width: 0; padding: 24px; overflow: auto; }
 
 /* Footer */
 .portal-footer { height: 40px; min-height: 40px; background: #FFFFFF; border-top: 1px solid #F2C7A6; display: flex; align-items: center; justify-content: center; color: #82451F; font-size: 0.9rem; }
+
+/* Logon overlay (covers portal-body only so header/footer remain visible) */
+.logon-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.logon-modal { width: 420px; background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); text-align: center; }
+.logon-modal h2 { margin: 0 0 8px 0; color: #EC6602; }
+.logon-desc { margin: 0 0 16px 0; color: #5a3b27; }
+.logon-input { width: 100%; padding: 10px 12px; border: 1px solid #E6C9B0; border-radius: 8px; margin-bottom: 16px; }
+.logon-actions { display:flex; justify-content:center }
+.btn { background: #EC6602; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+.btn:hover { opacity: 0.95 }
+
+/* Responsive tweaks */
+@media (max-width: 1366px) {
+  .portal { padding: 0 8px; }
+  .portal-nav { width: 220px; }
+  .header-logo { height: 56px; }
+  .logon-modal { width: 360px }
+}
+
+@media (max-width: 1024px) {
+  .portal-nav { display: none; }
+  .portal-content { padding: 12px; }
+  .header-title { font-size: 1rem; }
+  .logon-modal { width: 320px }
+}
 </style>

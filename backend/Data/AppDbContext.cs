@@ -8,6 +8,7 @@ namespace backend.Data
         public DbSet<Product> Products { get; set; }
         public DbSet<WorkHour> WorkHours { get; set; }
         public DbSet<NcmTime> NcmTimes { get; set; }
+        public DbSet<User> Users { get; set; }
         public static string DbProvider { get; set; } = "sqlite";
         public static string ConnectionString { get; set; } = "Data Source=workhour.db";
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -34,6 +35,37 @@ namespace backend.Data
                 .HasOne(n => n.Product)
                 .WithMany(p => p.NcmTimes)
                 .HasForeignKey(n => n.ProductId);
+
+            // Ensure State column exists and has default value
+            modelBuilder.Entity<WorkHour>(eb =>
+            {
+                eb.Property(w => w.State).HasMaxLength(50).HasDefaultValue("NotStarted");
+                eb.Property(w => w.StartTimeActual).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                eb.Property(w => w.EndTimeActual).HasDefaultValueSql("NULL");
+            });
+
+            modelBuilder.Entity<NcmTime>(eb =>
+            {
+                eb.Property(n => n.State).HasMaxLength(50).HasDefaultValue("NotStarted");
+                eb.Property(n => n.NcmAction).HasMaxLength(500);
+            });
+
+            // Users table configuration
+            modelBuilder.Entity<User>(eb =>
+            {
+                eb.HasKey(u => u.Id);
+                eb.Property(u => u.Id).ValueGeneratedOnAdd();
+
+                // Company account id (optional, string)
+                eb.Property(u => u.Gid).HasMaxLength(100);
+
+                // Display name
+                eb.Property(u => u.FullName).HasMaxLength(200).IsRequired();
+
+                // Email and role
+                eb.Property(u => u.Mail).HasMaxLength(200);
+                eb.Property(u => u.Role).HasMaxLength(100);
+            });
         }
     }
 }

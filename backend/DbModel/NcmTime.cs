@@ -12,5 +12,11 @@ namespace backend.DbModel
         public int ProductId { get; set; }
         public Product? Product { get; set; }
         public double NcmHour => (EndTime - StartTime).TotalHours;
+
+        // State of the NcmTime entry: NotStarted, Working, Completed, etc.
+        public string State { get; set; } = "NotStarted";
+
+        // Action/description for the NCM time
+        public string? NcmAction { get; set; }
     }
 }

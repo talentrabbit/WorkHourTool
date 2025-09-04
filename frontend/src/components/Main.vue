@@ -6,15 +6,17 @@
       <p class="hero-desc">Empowering production managers and workers with digital tools for efficient manufacturing.</p>
     </header>
     <div class="entry-links">
-      <router-link to="/planning" class="entry-link attention">
+      <router-link v-if="isAdmin || isManager" to="/planning" class="entry-link attention">
         <span class="icon">🚀</span>
         <span class="link-text">Production Planning</span>
       </router-link>
-      <router-link to="/worker" class="entry-link attention">
+
+      <router-link v-if="isWorker || isAdmin" to="/worker" class="entry-link attention">
         <span class="icon">🛠️</span>
-        <span class="link-text">Worker Entry</span>
+        <span class="link-text">Worker</span>
       </router-link>
-      <router-link to="/maintenance" class="entry-link attention">
+
+      <router-link v-if="isAdmin || isManager" to="/maintenance" class="entry-link attention">
         <span class="icon">🧰</span>
         <span class="link-text">WorkHour Maintenance</span>
       </router-link>
@@ -23,7 +25,12 @@
 </template>
 
 <script setup>
-// No logic needed for entry links
+import { inject, computed } from 'vue'
+const userRole = inject('userRole') || ''
+const roleVal = computed(() => (typeof userRole === 'object' && 'value' in userRole) ? (userRole.value || '') : (userRole || ''))
+const isWorker = computed(() => roleVal.value.toLowerCase() === 'worker')
+const isManager = computed(() => roleVal.value.toLowerCase() === 'productionmanager')
+const isAdmin = computed(() => roleVal.value.toLowerCase() === 'administrator')
 </script>
 
 <style scoped>
