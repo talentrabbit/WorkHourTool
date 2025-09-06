@@ -116,10 +116,11 @@ namespace backend.Controllers
             var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
             if (product == null) return NotFound(new { message = "Product not found" });
 
+            // Only include Completed work hours for accumulation
             var list = db.WorkHours
                 .AsNoTracking()
                 .Include(w => w.Product)
-                .Where(w => w.ProductId == product.Id)
+                .Where(w => w.ProductId == product.Id && w.State == "Completed")
                 .OrderByDescending(w => w.StartTime)
                 .Select(w => new
                 {
@@ -345,42 +346,55 @@ namespace backend.Controllers
             return Ok(new { message = "NcmTime updated" });
         }
 
+        // POST: api/WorkHours/set-working-by-id
+        [HttpPost("set-working-by-id")]
+        public IActionResult SetWorkingById([FromBody] SetWorkingByIdRequest req)
+        {
+            if (req == null) return BadRequest(new { message = "Request body required" });
+            if (string.IsNullOrWhiteSpace(req.WorkerName)) return BadRequest(new { message = "WorkerName is required" });
+            if (!req.WorkHourId.HasValue) return BadRequest(new { message = "WorkHourId is required" });
+
+            using var db = new AppDbContext();
+            var target = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId.Value);
+            if (target == null) return NotFound(new { message = "WorkHour not found" });
+
+            target.State = "Working";
+            target.WorkerName = req.WorkerName;
+            if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.UtcNow;
+            db.SaveChanges();
+
+            return Ok(new { message = "WorkHour state of updated", id = target.Id, state = target.State, workerName = target.WorkerName });
+        }
+
         // POST: api/WorkHours/set-working
+        // Find an existing WorkHour by WorkerName, SerialNo and StartDate (date part of StartTime) and set it to Working
         [HttpPost("set-working")]
         public IActionResult SetWorking([FromBody] SetWorkingRequest req)
         {
             if (req == null) return BadRequest(new { message = "Request body required" });
             if (string.IsNullOrWhiteSpace(req.WorkerName)) return BadRequest(new { message = "WorkerName is required" });
+            if (string.IsNullOrWhiteSpace(req.SerialNo)) return BadRequest(new { message = "SerialNo is required" });
+            if (!req.StartDate.HasValue) return BadRequest(new { message = "StartDate is required (date part of StartTime)" });
 
             using var db = new AppDbContext();
-            WorkHour? target = null;
+            var product = db.Products.FirstOrDefault(p => p.SerialNo == req.SerialNo);
+            if (product == null) return NotFound(new { message = "Product not found for SerialNo: " + req.SerialNo });
 
-            if (req.WorkHourId.HasValue)
-            {
-                target = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId.Value);
-            }
-            else if (req.ProductId.HasValue && !string.IsNullOrWhiteSpace(req.ProcessName))
-            {
-                // prefer a record with same worker name if available, otherwise the most recent one for that product/process
-                target = db.WorkHours
-                    .Where(w => w.ProductId == req.ProductId.Value && w.ProcessName == req.ProcessName)
-                    .OrderByDescending(w => w.StartTime)
-                    .FirstOrDefault(w => string.Equals(w.WorkerName ?? string.Empty, req.WorkerName, StringComparison.OrdinalIgnoreCase))
-                    ?? db.WorkHours
-                        .Where(w => w.ProductId == req.ProductId.Value && w.ProcessName == req.ProcessName)
-                        .OrderByDescending(w => w.StartTime)
-                        .FirstOrDefault();
-            }
+            var dateStart = req.StartDate.Value.Date;
+            var dateEnd = dateStart.AddDays(1);
+
+            var target = db.WorkHours
+                .Where(w => w.ProductId == product.Id && w.WorkerName == req.WorkerName && w.StartTime >= dateStart && w.StartTime < dateEnd)
+                .OrderByDescending(w => w.StartTime)
+                .FirstOrDefault();
 
             if (target == null)
             {
-                return NotFound(new { message = "No matching WorkHour record found" });
+                return NotFound(new { message = "No matching WorkHour record found for given worker/serial/date." });
             }
 
             target.State = "Working";
-            // ensure WorkerName is set to the actor
             target.WorkerName = req.WorkerName;
-            // if actual start not set, set it to now
             if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.UtcNow;
             db.SaveChanges();
 
@@ -418,6 +432,33 @@ namespace backend.Controllers
             wh.EndTimeActual = null;
             db.SaveChanges();
             return Ok(new { message = "WorkHour reset", id = wh.Id });
+        }
+
+        // GET: api/WorkHours/find-workhour-id?workerName=...&serialNo=...&startDate=yyyy-MM-dd
+        [HttpGet("find-workhour-id")]
+        public IActionResult FindWorkHourId([FromQuery] string workerName, [FromQuery] string serialNo, [FromQuery] DateTime? startDate)
+        {
+            if (string.IsNullOrWhiteSpace(workerName) || string.IsNullOrWhiteSpace(serialNo) || !startDate.HasValue)
+            {
+                return BadRequest(new { message = "workerName, serialNo and startDate (yyyy-MM-dd) are required" });
+            }
+
+            using var db = new AppDbContext();
+            var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
+            if (product == null) return NotFound(new { message = "Product not found for SerialNo: " + serialNo });
+
+            var dateStart = startDate.Value.Date;
+            var dateEnd = dateStart.AddDays(1);
+
+            var wh = db.WorkHours
+                .AsNoTracking()
+                .Where(w => w.ProductId == product.Id && w.WorkerName == workerName && w.StartTime >= dateStart && w.StartTime < dateEnd)
+                .OrderByDescending(w => w.StartTime)
+                .FirstOrDefault();
+
+            if (wh == null) return NotFound(new { message = "No WorkHour found for the given criteria" });
+
+            return Ok(new { id = wh.Id });
         }
 
         private class MIProdCommInfo
@@ -459,9 +500,14 @@ namespace backend.Controllers
 
         public class SetWorkingRequest
         {
+            public string WorkerName { get; set; } = string.Empty;
+            public string SerialNo { get; set; } = string.Empty;
+            public DateTime? StartDate { get; set; }
+        }
+
+        public class SetWorkingByIdRequest
+        {
             public int? WorkHourId { get; set; }
-            public int? ProductId { get; set; }
-            public string? ProcessName { get; set; }
             public string WorkerName { get; set; } = string.Empty;
         }
 

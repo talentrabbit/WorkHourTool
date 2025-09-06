@@ -11,6 +11,8 @@ provide('isCountingTimerActive', isCountingTimerActive)
 
 // selected serial from assignments
 const selectedSerial = ref('')
+const selectedProcess = ref('')
+const selectedWorkHourId = ref(null)
 
 const heroImages = [
   '/HeroSection/factory1.jpg',
@@ -91,10 +93,68 @@ async function checkTodayAssignments(){
   }
 }
 
+async function resolveWorkHourId(serial, processName) {
+  selectedWorkHourId.value = null
+  if (!serial) return
+  try {
+    const worker = matchedWorkerName.value || username.value || 'Guest'
+    // Prefer using the assignment's start date if present
+    let startDateStr = new Date().toISOString().slice(0,10)
+    const assign = todayAssignments.value.find(a => a.serialNo === serial && (!processName || ((a.processName || a.process || '') || '').toLowerCase().includes((processName || '').toLowerCase())))
+    if (assign && assign.startTime) {
+      startDateStr = new Date(assign.startTime).toISOString().slice(0,10)
+    }
+    const res = await axios.get('/api/WorkHours/find-workhour-id', { params: { workerName: worker, serialNo: serial, startDate: startDateStr } })
+    if (res && res.data && (res.data.id !== undefined && res.data.id !== null)) {
+      selectedWorkHourId.value = res.data.id
+    } else {
+      selectedWorkHourId.value = null
+    }
+  } catch (err) {
+    // Not found or other error — clear id
+    selectedWorkHourId.value = null
+  }
+}
+
 function onAssignmentClick(params) {
   const row = params?.row || params
   if (row?.serialNo) selectedSerial.value = row.serialNo
+  selectedProcess.value = row?.processName || row?.process || ''
+  // try resolve work hour id for this selection
+  void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
 }
+
+function onAssignmentCellClick(params) {
+  // vxe-table cell-click provides { row, column, cell, rowIndex, columnIndex }
+  const row = params?.row
+  const col = params?.column
+  // If the clicked column is the SerialNo column, treat it as selection
+  const prop = col?.property || col?.field || ''
+  if (prop === 'serialNo') {
+    if (row?.serialNo) selectedSerial.value = row.serialNo
+    selectedProcess.value = row?.processName || row?.process || ''
+    // resolve id for selection
+    void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+    // switch to counting tab automatically
+    activeTab.value = 'counting'
+  } else {
+    // fallback to row click behavior
+    onAssignmentClick(params)
+  }
+}
+
+// When user navigates to counting tab without an explicit selection,
+// pick the first assignment and resolve its WorkHourId so TimerClock can use it.
+watch(activeTab, (nv) => {
+  if (nv === 'counting' && !selectedSerial.value && todayAssignments.value && todayAssignments.value.length) {
+    const first = todayAssignments.value[0]
+    if (first) {
+      selectedSerial.value = first.serialNo
+      selectedProcess.value = first.processName || first.process || ''
+      void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+    }
+  }
+})
 
 watch([isWorker, activeTab], async ([w, tab]) => {
   if (w && tab === 'task' && !checkedToday.value) {
@@ -105,6 +165,21 @@ watch([isWorker, activeTab], async ([w, tab]) => {
 onMounted(() => {
   fetchOptions()
 })
+
+function handleStartWork(payload) {
+  // payload expected: { workHourId, serialNo, process }
+  try {
+    if (payload && typeof payload === 'object') {
+      if (payload.serialNo) selectedSerial.value = payload.serialNo
+      if (payload.process) selectedProcess.value = payload.process
+      selectedWorkHourId.value = payload.workHourId ?? null
+    }
+  } catch (e) {
+    selectedWorkHourId.value = null
+  }
+  // switch to counting tab so TimerClock is shown and receives the id
+  activeTab.value = 'counting'
+}
 </script>
 
 <template>
@@ -122,16 +197,21 @@ onMounted(() => {
       <p>Track, analyze, and improve your department's productivity.</p>
     </div>
     <div class="nav-tabs-horizontal">
-      <button :class="{active: activeTab === 'task'}" @click="activeTab = 'task'">Task Arrangement</button>
-      <button :class="{active: activeTab === 'counting'}" @click="activeTab = 'counting'">Work Hour Counting Tool</button>
-      <button :class="{active: activeTab === 'intro'}" @click="activeTab = 'intro'">Department Introduction</button>
+      <button :class="{active: activeTab === 'task', disabled: isCountingTimerActive && activeTab === 'counting'}"
+              :disabled="isCountingTimerActive && activeTab === 'counting'"
+              @click="!isCountingTimerActive && (activeTab = 'task')">Task Arrangement</button>
+      <button :class="{active: activeTab === 'counting'}"
+              @click="activeTab = 'counting'">Work Hour Counting Tool</button>
+      <button :class="{active: activeTab === 'intro', disabled: isCountingTimerActive && activeTab === 'counting'}"
+              :disabled="isCountingTimerActive && activeTab === 'counting'"
+              @click="!isCountingTimerActive && (activeTab = 'intro')">Department Introduction</button>
     </div>
     <div class="tab-content">
       <div v-if="activeTab === 'task'">
         <template v-if="isWorker">
           <div v-if="planningMode === 'view'" class="today-assignment">
             <h3>Today's Arrangements for {{ matchedWorkerName || username }}</h3>
-            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table" @row-click="onAssignmentClick">
+            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table" @row-click="onAssignmentClick" @cell-click="onAssignmentCellClick">
               <vxe-column field="serialNo" title="SerialNo" width="120" />
               <vxe-column field="systemType" title="SystemType" width="140" />
               <vxe-column field="processName" title="Process" width="160" />
@@ -141,16 +221,21 @@ onMounted(() => {
             </vxe-table>
           </div>
           <div v-else-if="planningMode === 'edit'">
-            <WorkSeat />
+            <WorkSeat @start-work-and-switch="handleStartWork" />
           </div>
           <div v-else class="wait-dim">
-            Wait for arrangement from Production Manager
+            <div>
+              <p>Wait for arrangement from Production Manager</p>
+              <div style="margin-top:1em; text-align:center;">
+                <button class="create-task-btn" @click="planningMode = 'edit'">Create task for me</button>
+              </div>
+            </div>
           </div>
         </template>
       </div>
 
       <div v-if="activeTab === 'counting'">
-        <TimerClock />
+        <TimerClock v-show="activeTab === 'counting'" :serialNo="selectedSerial" :process="selectedProcess" :username="username" :initialWorkHourId="selectedWorkHourId" />
       </div>
       <div v-if="activeTab === 'intro'">
         <h2>Department Self-Introduction</h2>
@@ -181,6 +266,8 @@ onMounted(() => {
 .nav-tabs-horizontal button { padding: 0.75em 1.5em; border: none; background: #FFE6D3; cursor: pointer; border-radius: 8px 8px 0 0; font-size: 1em; color: #82451F; box-shadow: 0 2px 6px rgba(236,102,2,0.12); transition: transform 0.1s; }
 .nav-tabs-horizontal button:hover { transform: translateY(-1px); }
 .nav-tabs-horizontal button.active { background: #FFFFFF; border: 1px solid #F2C7A6; border-bottom: 2px solid #EC6602; font-weight: 700; color: #A64E00; }
+/* Add disabled-tab styling when counting is active */
+.nav-tabs-horizontal button.disabled { opacity: 0.45; cursor: not-allowed; transform: none; pointer-events: none; }
 .tab-content { flex: 1; padding: 2em; background: #fff; border-radius: 0 0 8px 8px; box-shadow: 0 6px 18px rgba(236,102,2,0.12); min-height: 400px; overflow-y: auto; }
 .wait-dim { color: #999; background: #f8f8f8; border: 1px dashed #ddd; padding: 1rem; border-radius: 8px; text-align: center; }
 /* Add styles for product form */
@@ -222,4 +309,14 @@ onMounted(() => {
   box-shadow: 0 2px 6px rgba(236,102,2,0.12);
 }
 .start-work-btn:hover { transform: translateY(-1px); }
+.create-task-btn {
+  padding: 0.6em 1.2em;
+  background: #EC6602;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.create-task-btn:hover { background: #D45500 }
 </style>

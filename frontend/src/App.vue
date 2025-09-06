@@ -3,7 +3,7 @@
     <header class="portal-header">
       <div class="header-left">
         <img :src="logoUrl" alt="Company Logo" class="header-logo" />
-        <router-link to="/" class="home-btn" title="Home" aria-label="Home">🏠</router-link>
+        <router-link to="/" :class="['home-btn', {dimmed: isCountingTimerActive}]" title="Home" aria-label="Home">🏠</router-link>
       </div>
       <div class="header-title">SSME MI Digital Factory</div>
       <div class="header-right">
@@ -15,9 +15,9 @@
     <div class="portal-body">
       <aside  class="portal-nav">
         <nav>
-          <router-link v-if="isAdmin || isManager" to="/planning" class="nav-link" active-class="active">Production Planning</router-link>
-          <router-link v-if="isWorker || isAdmin" to="/worker" class="nav-link" active-class="active">Work Hour Tool</router-link>
-          <router-link v-if="isAdmin || isManager" to="/maintenance" class="nav-link" active-class="active">WorkHour Maintenance</router-link>
+          <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Production Planning</router-link>
+          <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
+          <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">WorkHour Maintenance</router-link>
         </nav>
       </aside>
       <main class="portal-content">
@@ -55,6 +55,11 @@ const username = ref(localStorage.getItem('username') || 'Guest')
 const userRole = ref(localStorage.getItem('userRole') || '')
 provide('username', username)
 provide('userRole', userRole)
+
+// global flag to indicate a counting timer is active (provided to children)
+import { ref as vueRef } from 'vue'
+const isCountingTimerActive = vueRef(false)
+provide('isCountingTimerActive', isCountingTimerActive)
 
 const workerNames = ref([])
 
@@ -180,6 +185,7 @@ onMounted(async () => {
 .nav-link { display: block; padding: 10px 12px; color: #82451F; text-decoration: none; border-radius: 8px; background: #FFE6D3; box-shadow: 0 1px 4px rgba(236,102,2,0.08); font-weight: 600; }
 .nav-link:hover { transform: translateY(-1px); background: #FFD9BB; }
 .nav-link.active { background: #FFFFFF; border: 1px solid #F2C7A6; color: #A64E00; }
+.nav-link.dimmed, .home-btn.dimmed { opacity: 0.45; pointer-events: none; }
 
 /* Main Content */
 .portal-content { flex: 1; min-width: 0; padding: 24px; overflow: auto; }
