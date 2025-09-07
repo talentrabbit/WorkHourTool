@@ -56,6 +56,7 @@ async function fetchOptions(){
   try {
     const workers = await axios.get('/api/workhours/all-worker-names')
     workerNames.value = Array.isArray(workers.data) ? workers.data : []
+    console.log("Fetched worker names:", workerNames.value)
   } catch {}
 }
 
@@ -67,7 +68,8 @@ async function checkTodayAssignments(){
   checkedToday.value = true
   todayAssignments.value = []
   const worker = matchedWorkerName.value || username.value
-  if (!worker) { planningMode.value = 'wait'; return }
+  console.log("matchedWorkerName is", matchedWorkerName.value, "username is", username.value)
+  if (!worker) { planningMode.value = 'wait'; return }  //If no work assigned, show "Wait for arrangement from Production Manager"
   try {
     const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: worker } })
     const items = Array.isArray(res.data) ? res.data : []
@@ -118,6 +120,8 @@ async function resolveWorkHourId(serial, processName) {
 
 function onAssignmentClick(params) {
   const row = params?.row || params
+  // Ignore clicks on completed assignments
+  if (row?.state === 'Completed') return
   if (row?.serialNo) selectedSerial.value = row.serialNo
   selectedProcess.value = row?.processName || row?.process || ''
   // try resolve work hour id for this selection
@@ -131,6 +135,8 @@ function onAssignmentCellClick(params) {
   // If the clicked column is the SerialNo column, treat it as selection
   const prop = col?.property || col?.field || ''
   if (prop === 'serialNo') {
+    // ignore clicks when already completed
+    if (row?.state === 'Completed') return
     if (row?.serialNo) selectedSerial.value = row.serialNo
     selectedProcess.value = row?.processName || row?.process || ''
     // resolve id for selection
@@ -143,6 +149,24 @@ function onAssignmentCellClick(params) {
   }
 }
 
+// Helper used by the State column button to start work for a row
+function startWorkFromRow(row) {
+  if (!row || row.state === 'Completed') return
+  try {
+    selectedSerial.value = row.serialNo
+    selectedProcess.value = row.processName || row.process || ''
+    void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+  } catch (e) {
+    // ignore
+  }
+  activeTab.value = 'counting'
+}
+
+// Provide a row class function to dim completed rows
+function rowClassName({ row }) {
+  return row && row.state === 'Completed' ? 'row-completed' : ''
+}
+
 // When user navigates to counting tab without an explicit selection,
 // pick the first assignment and resolve its WorkHourId so TimerClock can use it.
 watch(activeTab, (nv) => {
@@ -153,6 +177,11 @@ watch(activeTab, (nv) => {
       selectedProcess.value = first.processName || first.process || ''
       void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
     }
+  }
+  // When switching back to Task Arrangement, refresh today's assignments
+  if (nv === 'task') {
+    // re-check assignments so the table reflects recent submissions/assignments
+    void checkTodayAssignments()
   }
 })
 
@@ -211,13 +240,21 @@ function handleStartWork(payload) {
         <template v-if="isWorker">
           <div v-if="planningMode === 'view'" class="today-assignment">
             <h3>Today's Arrangements for {{ matchedWorkerName || username }}</h3>
-            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table" @row-click="onAssignmentClick" @cell-click="onAssignmentCellClick">
+            <vxe-table :data="todayAssignments" border stripe round class="modern-vxe-table" @row-click="onAssignmentClick" @cell-click="onAssignmentCellClick" :row-class-name="rowClassName">
               <vxe-column field="serialNo" title="SerialNo" width="120" />
               <vxe-column field="systemType" title="SystemType" width="140" />
               <vxe-column field="processName" title="Process" width="160" />
               <vxe-column field="coWorkerName" title="Co-worker" width="160" />
               <vxe-column field="startTime" title="Start Time" width="180" />
               <vxe-column field="endTime" title="End Time" width="180" />
+              <vxe-column title="State" width="120">
+                <template #default="{ row }">
+                  <div>
+                    <span v-if="row.state === 'Completed'">Completed</span>
+                    <button v-else class="start-work-btn" @click.stop="startWorkFromRow(row)">Work</button>
+                  </div>
+                </template>
+              </vxe-column>
             </vxe-table>
           </div>
           <div v-else-if="planningMode === 'edit'">
@@ -319,4 +356,6 @@ function handleStartWork(payload) {
   font-weight: 700;
 }
 .create-task-btn:hover { background: #D45500 }
+/* Dim completed assignment rows */
+.row-completed { opacity: 0.35; }
 </style>

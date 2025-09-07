@@ -266,14 +266,22 @@ async function updateWorkerAssignments() {
       params: { workerName: task.value.workerName }
     })
     if (Array.isArray(res.data)) {
-      existingAssignments.value = res.data.map(a => ({
-        serialNo: a.serialNo,
-        systemType: a.systemType,
-        processName: a.processName,
-        coWorkerName: a.coWorkerName || '',
-        startTime: a.startTime,
-        endTime: a.endTime
-      }))
+      // hide assignments earlier than 2 days before today
+      const threshold = new Date()
+      threshold.setDate(threshold.getDate() - 2)
+      existingAssignments.value = res.data
+        .filter(a => {
+          const s = a && a.startTime ? new Date(a.startTime) : null
+          return !s || s >= threshold
+        })
+        .map(a => ({
+          serialNo: a.serialNo,
+          systemType: a.systemType,
+          processName: a.processName,
+          coWorkerName: a.coWorkerName || '',
+          startTime: a.startTime,
+          endTime: a.endTime
+        }))
     } else {
       existingAssignments.value = []
     }
@@ -347,26 +355,45 @@ async function assignTask() {
   }
   const hours = computeHoursMinusLunch(startDt, endDt)
   // Primary worker
-  await axios.post('/api/WorkHours/submit-work-hours', {
-    SerialNo: product.value.serialNo,
-    WorkerName: task.value.workerName,
-    ProcessName: task.value.process,
-    Hours: hours,
-    StartTime: startStr,
-    EndTime: endStr
-  })
-  // Optional co-worker
-  if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
-    await axios.post('/api/WorkHours/submit-work-hours', {
+  let primaryPlanned = hours
+  try {
+    const resPrimary = await axios.post('/api/WorkHours/submit-work-hours', {
       SerialNo: product.value.serialNo,
-      WorkerName: task.value.coWorkerName,
+      WorkerName: task.value.workerName,
       ProcessName: task.value.process,
       Hours: hours,
       StartTime: startStr,
       EndTime: endStr
     })
+    // Prefer server-returned planned hours when present (flattened response expected)
+    primaryPlanned = Number(resPrimary?.data?.plannedHours ?? resPrimary?.data?.PlannedHours ?? hours)
+  } catch (e) {
+    console.error('Failed to submit primary assignment', e)
   }
-  alert(`Task assigned! Total hours: ${hours.toFixed(2)}`)
+
+  // Optional co-worker
+  let coPlanned = null
+  if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
+    try {
+      const resCo = await axios.post('/api/WorkHours/submit-work-hours', {
+        SerialNo: product.value.serialNo,
+        WorkerName: task.value.coWorkerName,
+        ProcessName: task.value.process,
+        Hours: hours,
+        StartTime: startStr,
+        EndTime: endStr
+      })
+      coPlanned = Number(resCo?.data?.plannedHours ?? resCo?.data?.PlannedHours ?? hours)
+    } catch (e) {
+      console.error('Failed to submit co-worker assignment', e)
+    }
+  }
+
+  // Build success message including planned hours for both workers and include start date
+  let msg = `Task assigned on ${task.value.startDate}. Planned hours - ${task.value.workerName}: ${primaryPlanned.toFixed(2)}`
+  if (coPlanned !== null) msg += `; ${task.value.coWorkerName}: ${coPlanned.toFixed(2)}`
+
+  alert(msg)
   if (task.value.workerName) await updateWorkerAssignments()
   if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
     await updateCoWorkerAssignments()

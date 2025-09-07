@@ -65,6 +65,13 @@ const activeClock = ref('') // 'work' or 'ncm' or ''
 let timer = null
 const currentWorkHourId = ref(null)
 
+// NCM metadata captured when NCM timer is started
+const processEngineer = ref('')
+const ncmAction = ref('')
+const showNcmInputs = ref(false)
+// New: track whether the current timers have been submitted so UI can be dimmed and controls disabled
+const submitted = ref(false)
+
 // initialize from parent-provided id if available
 if (props.initialWorkHourId) {
   currentWorkHourId.value = props.initialWorkHourId
@@ -72,6 +79,7 @@ if (props.initialWorkHourId) {
 
 // watch for parent updates
 watch(() => props.initialWorkHourId, (nv) => {
+  console.debug('TimerClock: initialWorkHourId prop changed ->', nv, 'old currentWorkHourId=', currentWorkHourId.value)
   currentWorkHourId.value = nv || null
 })
 
@@ -112,6 +120,12 @@ async function setWorkingBackend(workHourId) {
 
 
 function startClock(type) {
+  // Prevent starting new clocks if the current session has already been submitted
+  if (submitted.value) {
+    alert('Work hours already submitted for this session. Reset clocks to start again.')
+    return
+  }
+
   // If clicking the active clock, pause it
   if (activeClock.value === type) {
     if (timer) clearInterval(timer)
@@ -136,6 +150,16 @@ function startClock(type) {
         await setWorkingBackend(currentWorkHourId.value)
       })()
   }
+
+  // If starting NCM clock, show inputs for Process Engineer and Action
+  if (type === 'ncm') {
+    showNcmInputs.value = true
+    // gentle reminder if empty
+    if (!processEngineer.value) {
+      console.info('Please enter Process Engineer name for NCM time. The name will be stored when submitting.')
+      setTimeout(() => { if (!processEngineer.value) alert('Please enter Process Engineer name (visible beside NCM timer).') }, 250)
+    }
+  }
 }
 
 async function submitWorkHours() {
@@ -147,7 +171,21 @@ async function submitWorkHours() {
       alert('No WorkHour record found to complete')
       return
     }
-    const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest' }
+
+    // compute hours from timers (rounded to 2 decimals)
+    const effectiveHours = Math.round((workTime.value / 3600) * 100) / 100
+    const reportedNcmHours = Math.round((ncmTime.value / 3600) * 100) / 100
+
+    // build payload
+    const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest', EffectiveHours: effectiveHours }
+
+    // include NCM info if present
+    if (reportedNcmHours > 0) {
+      payload.NcmHours = reportedNcmHours
+      payload.ProcessEngineer = processEngineer.value || null
+      payload.NcmAction = ncmAction.value || null
+    }
+
     const res = await axios.post('/api/WorkHours/complete', payload)
     console.log('Complete response', res.data)
     // stop timer locally
@@ -155,6 +193,11 @@ async function submitWorkHours() {
     timer = null
     activeClock.value = ''
     if (isCountingTimerActive) isCountingTimerActive.value = false
+
+    // keep timers and NCM metadata visible but mark as submitted and dim UI
+    submitted.value = true
+    showNcmInputs.value = false
+
     alert('Work hour completed.')
   } catch (err) {
     console.error('Failed to complete work hour', err)
@@ -168,16 +211,18 @@ async function resetClocks() {
   const correctPassword = 'reset';
   if (password === correctPassword) {
     try {
-      // Use existing WorkHour id if available; avoid creating a new one solely for reset
+      // snapshot current id for logging/preserve
+      const id = currentWorkHourId.value
+      console.debug('TimerClock.resetClocks: starting reset for WorkHourId=', id)
 
-        // attempt to resolve one (will set to Working briefly)
-      if (!currentWorkHourId.value) {
+      // attempt to resolve one (will set to Working briefly)
+      if (!id) {
         alert('No assigned WorkHour found. Please select a task before resetting.')
       }
 
-      if (currentWorkHourId.value) {
-        await axios.post('/api/WorkHours/reset', { WorkHourId: currentWorkHourId.value })
-        console.log('Reset workhour', id)
+      if (id) {
+        await axios.post('/api/WorkHours/reset', { WorkHourId: id })
+        console.debug('TimerClock.resetClocks: reset request completed for WorkHourId=', id)
       }
     } catch (err) {
       console.error('Failed to reset workhour', err)
@@ -187,7 +232,10 @@ async function resetClocks() {
     activeClock.value = ''
     if (isCountingTimerActive) isCountingTimerActive.value = false
     if (timer) clearInterval(timer)
-    currentWorkHourId.value = null
+    // clear submitted state so user can start again
+    submitted.value = false
+    // restore the local id snapshot in case parent briefly cleared the prop
+    if (id) currentWorkHourId.value = id
     alert('Clocks have been reset.')
   } else if (password !== null) {
     alert('Incorrect password. Reset cancelled.')
@@ -207,6 +255,12 @@ watch(serialNo, (nv, ov) => {
     activeClock.value = ''
     if (isCountingTimerActive) isCountingTimerActive.value = false
     currentWorkHourId.value = null
+    // clear ncm inputs when serial changes
+    processEngineer.value = ''
+    ncmAction.value = ''
+    showNcmInputs.value = false
+    // clear submitted state when switching systems
+    submitted.value = false
   }
 })
 </script>
@@ -229,20 +283,34 @@ watch(serialNo, (nv, ov) => {
     <div class="workhour-clocks-row">
       <div class="clock-block">
         <div class="clock-label">Effective Working Time</div>
-        <div class="clock-time" :class="{active: activeClock === 'work'}">{{ formatTime(workTime) }}</div>
-        <button class="circle-wide-btn" :class="{active: activeClock === 'work', dimmed: isCountingTimerActive && activeClock !== 'work'}" :disabled="isCountingTimerActive && activeClock !== 'work'" @click="startClock('work')" title="Work">Work</button>
+        <div class="clock-time" :class="{active: activeClock === 'work', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
+        <button class="circle-wide-btn" :class="{active: activeClock === 'work', dimmed: isCountingTimerActive && activeClock !== 'work'}" :disabled="(isCountingTimerActive && activeClock !== 'work') || submitted" @click="startClock('work')" title="Work">Work</button>
       </div>
       <div class="clock-block">
         <div class="clock-label">NCM Time</div>
-        <div class="clock-time" :class="{active: activeClock === 'ncm'}">{{ formatTime(ncmTime) }}</div>
-        <button class="circle-wide-btn" :class="[{active: activeClock === 'ncm', dimmed: isCountingTimerActive && activeClock !== 'ncm'}, {'ncm-active': activeClock === 'ncm'}]" :disabled="isCountingTimerActive && activeClock !== 'ncm'" @click="startClock('ncm')" title="NCM">NCM</button>
+        <div class="clock-time" :class="{active: activeClock === 'ncm', 'submitted-dim': submitted}">{{ formatTime(ncmTime) }}</div>
+        <button class="circle-wide-btn" :class="[{active: activeClock === 'ncm', dimmed: isCountingTimerActive && activeClock !== 'ncm'}, {'ncm-active': activeClock === 'ncm'}, {'submitted-dim': submitted}]" :disabled="(isCountingTimerActive && activeClock !== 'ncm') || submitted" @click="startClock('ncm')" title="NCM">NCM</button>
       </div>
     </div>
     <div class="reset-btn-row">
       <span class="reset-btn-spacer"></span>
-      <button class="submit-btn" @click="submitWorkHours" title="Submit Work Hours">Submit Work Hours</button>
+      <button class="submit-btn" @click="submitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
       <span class="reset-btn-spacer"></span>
       <button class="reset-btn" @click="resetClocks" title="Will reset all clocks!">⟳</button>
+    </div>
+    <!-- Inline inputs for NCM metadata, shown when NCM timer is active -->
+    <div v-if="showNcmInputs" class="ncm-panel">
+      <div class="ncm-panel-header">NCM Details</div>
+      <div class="ncm-inputs">
+        <div class="ncm-input-row">
+          <label class="ncm-input-label">Process Engineer:</label>
+          <input v-model="processEngineer" class="ncm-input" placeholder="Enter name" />
+        </div>
+        <div class="ncm-input-row">
+          <label class="ncm-input-label">NCM Action:</label>
+          <input v-model="ncmAction" class="ncm-input" placeholder="Enter action" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -304,6 +372,9 @@ watch(serialNo, (nv, ov) => {
 .clock-time.active {
   color: #42b883;
 }
+.clock-time.submitted-dim {
+  opacity: 0.45;
+}
 /* Button row: two columns, each 50% width */
 .workhour-btn-row {
   display: flex;
@@ -362,7 +433,7 @@ watch(serialNo, (nv, ov) => {
   border-radius: 8px;
   padding: 1em 2em;
   box-shadow: 0 1px 4px #0001;
-}
+ }
  .reset-btn-row {
    display: flex;
    align-items: center;
@@ -399,6 +470,10 @@ watch(serialNo, (nv, ov) => {
  .submit-btn:hover {
    background: #36976b;
  }
+ .submit-btn.submitted-dim {
+   opacity: 0.6;
+   cursor: not-allowed;
+ }
  .reset-btn {
    background: #ffe066;
    color: #333;
@@ -420,4 +495,44 @@ watch(serialNo, (nv, ov) => {
  .reset-btn:hover {
    background: #ffd43b;
  }
+ /* NCM metadata input styles */
+ .ncm-inputs {
+   display: flex;
+   flex-direction: column;
+   gap: 1em;
+   margin-top: 1.5em;
+ }
+ .ncm-input-row {
+   display: flex;
+   flex-direction: row;
+   gap: 1em;
+   width: 100%;
+ }
+ .ncm-input-label {
+   flex: 0 0 150px;
+   font-weight: bold;
+   align-self: center;
+ }
+ .ncm-input {
+   flex: 1;
+   padding: 0.8em;
+   font-size: 1em;
+   border: 1px solid #ccc;
+   border-radius: 4px;
+   box-shadow: 0 1px 3px #0001;
+ }
+/* Add panel styles */
+.ncm-panel {
+  background: #fff;
+  border: 1px solid #f2c7a6;
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  margin-top: 1rem;
+}
+.ncm-panel-header {
+  font-weight: 700;
+  color: #e74c3c;
+  margin-bottom: 0.75rem;
+}
 </style>

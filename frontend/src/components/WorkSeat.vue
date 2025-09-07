@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, onMounted, inject, watch } from 'vue'
 import axios from 'axios'
 const emit = defineEmits(['start-work-and-switch'])
 
@@ -33,6 +33,49 @@ const form = ref({
   endDate: '',
   endTime: ''
 })
+
+// coworker conflict state - do not overwrite existing onMounted
+const coworkerConflict = ref(false)
+const coworkerConflictMessages = ref([])
+
+async function checkCoworkerConflicts(){
+  coworkerConflict.value = false
+  coworkerConflictMessages.value = []
+  const selected = Array.isArray(form.value.coWorkers) ? form.value.coWorkers.filter(Boolean) : []
+  if (!selected.length) return
+  const todayStr = new Date().toISOString().slice(0,10)
+  try{
+    for (const cw of selected){
+      const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: cw } })
+      const assignments = Array.isArray(res.data) ? res.data : (res.data?.assignments || [])
+      for (const a of assignments){
+        const st = a?.StartTime ?? a?.startTime ?? null
+        const en = a?.EndTime ?? a?.endTime ?? null
+        const stDate = st ? new Date(st).toISOString().slice(0,10) : null
+        const enDate = en ? new Date(en).toISOString().slice(0,10) : null
+        if (stDate === todayStr || enDate === todayStr){
+          const proc = a?.ProcessName ?? a?.processName ?? ''
+          const serial = a?.SerialNo ?? a?.serialNo ?? ''
+          const sys = a?.SystemType ?? a?.systemType ?? ''
+          let location = ''
+          if (serial && sys) location = ` on system ${serial} (${sys})`
+          // else if (serial) location = ` on system ${serial}`
+          // else if (sys) location = ` (${sys})`
+
+          coworkerConflictMessages.value.push(`${cw} has an assignment today${location}${proc ? ` — ${proc}` : ''}`)
+          coworkerConflict.value = true
+          break
+        }
+      }
+    }
+  }catch(e){
+    console.warn('Failed to check coworker assignments', e)
+    // do not block start if backend fails
+  }
+}
+
+watch(() => form.value.coWorkers, () => { checkCoworkerConflicts() }, { deep: true })
+onMounted(() => { checkCoworkerConflicts() })
 
 onMounted(async () => {
   // load seriesNos, processes and worker names from backend
@@ -106,6 +149,7 @@ function computeHoursMinusLunch(start, end) {
 async function startWork(){
   if (!form.value.seriesNo) { alert('Please select a Series No.'); return }
   if (!form.value.process) { alert('Please select a Process'); return }
+  if (coworkerConflict.value){ alert('One or more selected co-workers have assignments today. Remove them or pick another date.'); return }
   // compute start/end datetimes
   const startStr = `${form.value.startDate}T${form.value.startTime}:00`
   const endStr = `${form.value.endDate}T${form.value.endTime}:00`
@@ -215,6 +259,12 @@ async function startWork(){
             <option v-for="worker in coWorkers" :key="worker" :value="worker">{{ worker }}</option>
           </select>
           <small v-if="showCoWorker">Select one or more co-workers if this process requires multiple people.</small>
+          <div v-if="coworkerConflict && coworkerConflictMessages.length" class="cw-conflict">
+            <strong>Warning:</strong>
+            <ul>
+              <li v-for="(m,i) in coworkerConflictMessages" :key="i">{{ m }}</li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -233,7 +283,7 @@ async function startWork(){
       </div>
 
       <div class="form-actions">
-        <button type="button" class="start-work-btn" @click="startWork">Start Work</button>
+        <button type="button" class="start-work-btn" @click="startWork" :disabled="coworkerConflict">Start Work</button>
       </div>
     </form>
   </div>
@@ -355,4 +405,6 @@ async function startWork(){
     font-size: 0.9em;
     color: #333;
   }
+  .cw-conflict{ margin-top:8px; background:#fff3cd; border:1px solid #ffeeba; padding:8px; border-radius:6px }
+  .cw-conflict strong{ color:#856404 }
 </style>

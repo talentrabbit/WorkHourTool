@@ -314,7 +314,7 @@ static string ExtractSamAccountName(string domainQualified)
 app.MapGet("/api/auth/roles", () => Results.Ok(rolesConfig)).AllowAnonymous();
 
 // Endpoint to find a user by Gid, FullName or Mail (case-insensitive)
-app.MapGet("/api/auth/find-user", (HttpRequest http) =>
+app.MapGet("/api/auth/find-user", (HttpRequest http, ILogger<Program> logger) =>
 {
     var q = http.Query["q"].FirstOrDefault()?.Trim();
     if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { message = "q query parameter is required" });
@@ -333,6 +333,7 @@ app.MapGet("/api/auth/find-user", (HttpRequest http) =>
     }
     catch (Exception ex)
     {
+        logger.LogError(ex, "Error while searching for user. Query={Query}", q);
         return Results.Problem(ex.Message);
     }
 }).AllowAnonymous();

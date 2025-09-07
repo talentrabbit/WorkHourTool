@@ -50,6 +50,7 @@
 import { ref, onMounted, computed, provide, watch } from 'vue'
 import axios from 'axios'
 import logoUrl from '../company-logo.png?url'
+import { useRouter } from 'vue-router'
 
 const username = ref(localStorage.getItem('username') || 'Guest')
 const userRole = ref(localStorage.getItem('userRole') || '')
@@ -62,6 +63,7 @@ const isCountingTimerActive = vueRef(false)
 provide('isCountingTimerActive', isCountingTimerActive)
 
 const workerNames = ref([])
+const router = useRouter()
 
 // Role-derived flags
 const isWorker = computed(() => (userRole.value || '').toLowerCase() === 'worker')
@@ -80,6 +82,15 @@ function applyUserFromResponse(data) {
   userRole.value = data.role || (Array.isArray(data.roles) && data.roles[0]) || ''
   try { localStorage.setItem('username', username.value) } catch {}
   try { localStorage.setItem('userRole', userRole.value) } catch {}
+  // Redirect based on role
+  const r = (userRole.value || '').toLowerCase()
+  if (r === 'productionmanager') {
+    router.push('/planning')
+  } else if (r === 'worker') {
+    router.push('/worker')
+  } else if (r === 'administrator') {
+    router.push('/')
+  }
 }
 
 async function doLogon() {
@@ -130,9 +141,9 @@ watch(username, (nv) => {
 
 onMounted(async () => {
   // trigger Negotiate handshake first (non-blocking)
-  try {
-    await axios.get('/api/auth/challenge')
-  } catch {}
+  // try {
+  //   await axios.get('/api/auth/challenge')
+  // } catch {}
 
   // Attempt to read current-user (may be anonymous)
   try {

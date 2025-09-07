@@ -81,14 +81,25 @@ namespace backend.Controllers
             {
                 WorkerName = dto.WorkerName,
                 ProcessName = dto.ProcessName,
-                EffectiveHours = dto.Hours,
+                PlannedHours = dto.Hours,
                 StartTime = dto.StartTime,
                 EndTime = dto.EndTime,
                 ProductId = product.Id
             };
             db.WorkHours.Add(workHour);
             db.SaveChanges();
-            return Ok(new { message = "Work hours submitted", data = new { workHour.Id, workHour.WorkerName, workHour.ProcessName, workHour.EffectiveHours, workHour.StartTime, workHour.EndTime } });
+
+            // Return a flat response to make it easy for front-end to pick up planned hours
+            return Ok(new
+            {
+                message = "Work hours submitted",
+                id = workHour.Id,
+                workerName = workHour.WorkerName,
+                plannedHours = workHour.PlannedHours,
+                PlannedHours = workHour.PlannedHours, //for frontend compatibility.
+                StartTime = workHour.StartTime,
+                EndTime = workHour.EndTime
+            });
         }
 
         // GET: api/WorkHours/product-status/{serialNo}
@@ -239,6 +250,7 @@ namespace backend.Controllers
                     SerialNo = w.Product != null ? w.Product.SerialNo : null,
                     SystemType = w.Product != null ? w.Product.SystemType : null,
                     ProcessName = w.ProcessName,
+                    State = w.State,
                     StartTime = w.StartTime,
                     EndTime = w.EndTime,
                     CoWorkerName = db.WorkHours
@@ -272,8 +284,12 @@ namespace backend.Controllers
                     WorkerName = w.WorkerName,
                     ProcessName = w.ProcessName,
                     EffectiveHours = w.EffectiveHours,
+                    PlannedHours = w.PlannedHours,
+                    State = w.State,
                     StartTime = w.StartTime,
-                    EndTime = w.EndTime
+                    EndTime = w.EndTime,
+                    StartTimeActual = w.StartTimeActual,
+                    EndTimeActual = w.EndTimeActual
                 })
                 .ToList();
             return Ok(list);
@@ -297,7 +313,9 @@ namespace backend.Controllers
                     ProcessName = n.ProcessName,
                     StartTime = n.StartTime,
                     EndTime = n.EndTime,
-                    NcmHour = (n.EndTime - n.StartTime).TotalHours
+                    NcmHour = (n.EndTime - n.StartTime).TotalHours,
+                    State = n.State,
+                    NcmAction = n.NcmAction
                 })
                 .ToList();
             return Ok(list);
@@ -320,8 +338,22 @@ namespace backend.Controllers
                 if (dto.EffectiveHours.Value < 0) return BadRequest(new { message = "EffectiveHours cannot be negative" });
                 wh.EffectiveHours = dto.EffectiveHours.Value;
             }
+            // support PlannedHours update
+            if (dto.PlannedHours.HasValue)
+            {
+                if (dto.PlannedHours.Value < 0) return BadRequest(new { message = "PlannedHours cannot be negative" });
+                wh.PlannedHours = dto.PlannedHours.Value;
+            }
+            // support state update
+            if (!string.IsNullOrWhiteSpace(dto.State)) wh.State = dto.State;
+
             if (dto.StartTime.HasValue) wh.StartTime = dto.StartTime.Value;
             if (dto.EndTime.HasValue) wh.EndTime = dto.EndTime.Value;
+
+            // allow saving actual timestamps when provided
+            if (dto.StartTimeActual.HasValue) wh.StartTimeActual = dto.StartTimeActual.Value;
+            if (dto.EndTimeActual.HasValue) wh.EndTimeActual = dto.EndTimeActual.Value;
+
             if (wh.EndTime <= wh.StartTime)
             {
                 return BadRequest(new { message = "EndTime must be after StartTime" });
@@ -330,9 +362,29 @@ namespace backend.Controllers
             return Ok(new { message = "WorkHour updated" });
         }
 
-        // PUT: api/WorkHours/ncmtimes/{id}
-        [HttpPut("ncmtimes/{id:int}")]
-        public IActionResult UpdateNcmTime(int id, [FromBody] UpdateNcmTimeDto dto)
+        // PUT: api/WorkHours/{id}
+        [HttpPut("{id:int}")]
+        public IActionResult UpdateWorkHourById(int id, [FromBody] UpdateWorkHourDto dto)
+        {
+            // delegate to existing UpdateWorkHour logic
+            return UpdateWorkHour(id, dto);
+        }
+
+        // DELETE: api/WorkHours/{id}
+        [HttpDelete("{id:int}")]
+        public IActionResult DeleteWorkHourById(int id)
+        {
+            using var db = new AppDbContext();
+            var wh = db.WorkHours.FirstOrDefault(x => x.Id == id);
+            if (wh == null) return NotFound(new { message = $"WorkHour {id} not found" });
+            db.WorkHours.Remove(wh);
+            db.SaveChanges();
+            return Ok(new { message = "WorkHour deleted", id });
+        }
+
+        // PUT: api/NcmTimes/{id}
+        [HttpPut("~/api/NcmTimes/{id:int}")]
+        public IActionResult UpdateNcmTimeByRoot(int id, [FromBody] UpdateNcmTimeDto dto)
         {
             using var db = new AppDbContext();
             var nt = db.NcmTimes.FirstOrDefault(x => x.Id == id);
@@ -342,8 +394,22 @@ namespace backend.Controllers
             }
             if (dto.ProcessName != null) nt.ProcessName = dto.ProcessName;
             if (dto.ProcessEngineer != null) nt.ProcessEngineer = dto.ProcessEngineer;
+            if (dto.NcmAction != null) nt.NcmAction = dto.NcmAction;
+            if (!string.IsNullOrWhiteSpace(dto.State)) nt.State = dto.State;
             db.SaveChanges();
             return Ok(new { message = "NcmTime updated" });
+        }
+
+        // DELETE: api/NcmTimes/{id}
+        [HttpDelete("~/api/NcmTimes/{id:int}")]
+        public IActionResult DeleteNcmTimeByRoot(int id)
+        {
+            using var db = new AppDbContext();
+            var nt = db.NcmTimes.FirstOrDefault(x => x.Id == id);
+            if (nt == null) return NotFound(new { message = $"NcmTime {id} not found" });
+            db.NcmTimes.Remove(nt);
+            db.SaveChanges();
+            return Ok(new { message = "NcmTime deleted", id });
         }
 
         // POST: api/WorkHours/set-working-by-id
@@ -410,10 +476,35 @@ namespace backend.Controllers
             var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
             if (wh == null) return NotFound(new { message = "WorkHour not found" });
 
+            // Update EffectiveHours with reported value (from timer)
+            if (req.EffectiveHours.HasValue)
+            {
+                wh.EffectiveHours = req.EffectiveHours.Value;
+            }
+
             wh.State = "Completed";
             wh.EndTimeActual = DateTime.UtcNow;
             // optionally update WorkerName
             if (!string.IsNullOrWhiteSpace(req.WorkerName)) wh.WorkerName = req.WorkerName;
+
+            // If NCM time reported, insert an NcmTime record
+            if (req.NcmHours.HasValue && req.NcmHours.Value > 0)
+            {
+                // require ProcessEngineer to be provided when NCM time exists
+                if (string.IsNullOrWhiteSpace(req.ProcessEngineer)) return BadRequest(new { message = "ProcessEngineer is required when reporting NCM time" });
+                var ncm = new NcmTime
+                {
+                    ProcessEngineer = req.ProcessEngineer,
+                    ProcessName = wh.ProcessName,
+                    EndTime = DateTime.UtcNow,
+                    StartTime = DateTime.UtcNow.AddHours(-req.NcmHours.Value),
+                    ProductId = wh.ProductId,
+                    State = "Completed",
+                    NcmAction = req.NcmAction
+                };
+                db.NcmTimes.Add(ncm);
+            }
+
             db.SaveChanges();
             return Ok(new { message = "WorkHour completed", id = wh.Id, endTimeActual = wh.EndTimeActual });
         }
@@ -478,6 +569,17 @@ namespace backend.Controllers
             public DateTime EndTime { get; set; }
         }
 
+        public class CompleteWorkHourRequest
+        {
+            public int WorkHourId { get; set; }
+            public string? WorkerName { get; set; }
+            public double? EffectiveHours { get; set; }
+            // Optional NCM reporting
+            public double? NcmHours { get; set; }
+            public string? ProcessEngineer { get; set; }
+            public string? NcmAction { get; set; }
+        }
+
         public class UpdateWorkHourDto
         {
             public string? WorkerName { get; set; }
@@ -485,12 +587,19 @@ namespace backend.Controllers
             public double? EffectiveHours { get; set; }
             public DateTime? StartTime { get; set; }
             public DateTime? EndTime { get; set; }
+            // new: allow updating planned hours, state and actual timestamps
+            public double? PlannedHours { get; set; }
+            public string? State { get; set; }
+            public DateTime? StartTimeActual { get; set; }
+            public DateTime? EndTimeActual { get; set; }
         }
 
         public class UpdateNcmTimeDto
         {
             public string? ProcessName { get; set; }
             public string? ProcessEngineer { get; set; }
+            public string? NcmAction { get; set; }
+            public string? State { get; set; }
         }
 
         public class IdsRequest
@@ -509,12 +618,6 @@ namespace backend.Controllers
         {
             public int? WorkHourId { get; set; }
             public string WorkerName { get; set; } = string.Empty;
-        }
-
-        public class CompleteWorkHourRequest
-        {
-            public int WorkHourId { get; set; }
-            public string? WorkerName { get; set; }
         }
 
         public class ResetWorkHourRequest
