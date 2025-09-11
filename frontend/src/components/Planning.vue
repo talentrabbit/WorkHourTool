@@ -15,7 +15,7 @@
           <strong>Current State:</strong> {{ productState }}
         </div>
       </div>
-      <div class="assign-section">
+      <div class="assign-section" v-if="!showNonProduct">
         <h4>Assign Task</h4>
         <div class="assign-grid">
           <div>
@@ -85,8 +85,13 @@
     </div>
     <div v-if="searchError" class="error">{{ searchError }}</div>
 
-    <div class="all-products-section modern-table">
-      <h3>All Systems Production State</h3>
+    <div class="all-products-section modern-table" v-if="!showNonProduct">
+      <div class="all-products-header">
+        <h3>All Systems Production State</h3>
+        <button class="add-nonproduct-btn" @click="openNonProductPanel">
+          Add Non-Product Task <span class="arrow">→</span>
+        </button>
+      </div>
       <div v-if="allLoading" class="loading">Loading...</div>
       <div v-else>
         <div v-for="group in groupedProducts" :key="group.systemType" class="system-group">
@@ -106,6 +111,57 @@
         </div>
       </div>
     </div>
+
+    <!-- Non-Product Task Panel -->
+    <div class="non-product-panel" v-if="showNonProduct">
+      <div class="non-product-header">
+        <button class="back-btn" @click="closeNonProductPanel">←</button>
+        <h3>Non-Product Task</h3>
+      </div>
+      <div class="assign-grid non-product-grid">
+        <div>
+          <label>Worker Name</label>
+          <select v-model="nonProductTask.workerName">
+            <option value="">-- Select --</option>
+            <option v-for="name in workerNames" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </div>
+        <div>
+          <label>Work Description</label>
+          <input type="text" v-model="nonProductTask.process" placeholder="Describe task or process" />
+        </div>
+        <div>
+          <label>Co-worker (optional)</label>
+          <select v-model="nonProductTask.coWorkerName">
+            <option value="">-- None --</option>
+            <option v-for="name in coWorkerOptionsNon" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </div>
+
+        <div class="grid-spacer" aria-hidden="true"></div>
+        <div>
+          <label>Start Date</label>
+          <input type="date" v-model="nonProductTask.startDate" />
+        </div>
+        <div>
+          <label>Start Time</label>
+          <input type="time" v-model="nonProductTask.startTime" />
+        </div>
+        <div>
+          <label>End Date</label>
+          <input type="date" v-model="nonProductTask.endDate" />
+        </div>
+        <div>
+          <label>End Time</label>
+          <input type="time" v-model="nonProductTask.endTime" />
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <button @click="assignNonProductTask" class="assign-btn" :disabled="isNonProductAssignDisabled">Assign</button>
+        <button @click="closeNonProductPanel" class="cancel-btn" style="margin-left:8px;">Cancel</button>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -137,7 +193,19 @@ const coWorkerAssignments = ref([]) // new: assignments for selected co-worker
 const hasConflict = ref(false)
 const conflictFor = ref('') // new: who has the conflict
 
+const showNonProduct = ref(false)
+const nonProductTask = ref({
+  workerName: '',
+  process: '',
+  coWorkerName: '',
+  startDate: '',
+  endDate: '',
+  startTime: '',
+  endTime: ''
+})
+
 const coWorkerOptions = computed(() => workerNames.value.filter(n => n !== task.value.workerName))
+const coWorkerOptionsNon = computed(() => workerNames.value.filter(n => n !== nonProductTask.value.workerName))
 
 function getTomorrowDateStr() {
   const d = new Date()
@@ -160,6 +228,10 @@ onMounted(async () => {
   task.value.endDate = tomorrow
   task.value.startTime = '08:30'
   task.value.endTime = '17:00'
+  nonProductTask.value.startDate = tomorrow
+  nonProductTask.value.endDate = tomorrow
+  nonProductTask.value.startTime = '08:30'
+  nonProductTask.value.endTime = '17:00'
 })
 
 watch(() => task.value.workerName, () => {
@@ -191,6 +263,16 @@ function currentRange() {
   if (!task.value.startDate || !task.value.startTime || !task.value.endDate || !task.value.endTime) return null
   const startStr = `${task.value.startDate}T${task.value.startTime}:00`
   const endStr = `${task.value.endDate}T${task.value.endTime}:00`
+  const start = new Date(startStr)
+  const end = new Date(endStr)
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return null
+  return { start, end }
+}
+
+function currentRangeNon() {
+  if (!nonProductTask.value.startDate || !nonProductTask.value.startTime || !nonProductTask.value.endDate || !nonProductTask.value.endTime) return null
+  const startStr = `${nonProductTask.value.startDate}T${nonProductTask.value.startTime}:00`
+  const endStr = `${nonProductTask.value.endDate}T${nonProductTask.value.endTime}:00`
   const start = new Date(startStr)
   const end = new Date(endStr)
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return null
@@ -234,9 +316,9 @@ async function fetchAllProducts() {
         serialNo: p.serialNo,
         projectNo: p.projectNo,
         systemType: p.systemType,
-        productionState: p.workingProcess,
-        workHourOverall: p.workHourOverall,
-        ncmTimeOverall: p.ncmTimeOverall
+        productionState:  p.workingProcess,
+        workHourOverall: p.workHourOverall  ?? 0,
+        ncmTimeOverall: p.ncmTimeOverall  ?? 0
       }))
     } else {
       console.error('Expected an array but got:', res.data)
@@ -430,6 +512,9 @@ const isAssignDisabled = computed(() => {
     !task.value.endTime ||
     hasConflict.value
 })
+const isNonProductAssignDisabled = computed(() => {
+  return !nonProductTask.value.workerName || !nonProductTask.value.process || !currentRangeNon()
+})
 // grouped view by systemType for All Products area
 const groupedProducts = computed(() => {
   try {
@@ -451,6 +536,94 @@ const groupedProducts = computed(() => {
     return []
   }
 })
+
+function openNonProductPanel() {
+  showNonProduct.value = true
+  // hide assign-section is handled by template v-if
+  // initialize defaults similar to assign task
+  const tomorrow = getTomorrowDateStr()
+  nonProductTask.value.startDate = tomorrow
+  nonProductTask.value.endDate = tomorrow
+  nonProductTask.value.startTime = '08:30'
+  nonProductTask.value.endTime = '17:00'
+}
+function closeNonProductPanel() {
+  showNonProduct.value = false
+}
+
+async function assignNonProductTask() {
+  const r = currentRangeNon()
+  if (!r) {
+    alert('Please ensure start time is before end time.')
+    return
+  }
+  // compute hours with lunch deduction
+  const hours = computeHoursMinusLunch(r.start, r.end)
+
+  try {
+    const startStr = `${nonProductTask.value.startDate}T${nonProductTask.value.startTime}:00`
+    const endStr = `${nonProductTask.value.endDate}T${nonProductTask.value.endTime}:00`
+
+    // Primary (assigned) worker
+    let plannedPrimary = hours
+    try {
+      const res = await axios.post('/api/WorkHours/submit-work-hours', {
+        SerialNo: '999999', // Give 999999 SerialNo as Non-Product Task (DB should contain this placeholder product)
+        WorkerName: nonProductTask.value.workerName,
+        ProcessName: nonProductTask.value.process,
+        Hours: hours,
+        StartTime: startStr,
+        EndTime: endStr
+      })
+      plannedPrimary = Number(res.data?.plannedHours ?? hours)
+    } catch (errPrimary) {
+      console.error('Failed to submit primary non-product assignment', errPrimary)
+    }
+
+    // Optional co-worker: submit a separate WorkHour record for the co-worker
+    let plannedCo = null
+    if (nonProductTask.value.coWorkerName && nonProductTask.value.coWorkerName !== nonProductTask.value.workerName) {
+      try {
+        const resCo = await axios.post('/api/WorkHours/submit-work-hours', {
+          SerialNo: '999999',
+          WorkerName: nonProductTask.value.coWorkerName,
+          ProcessName: nonProductTask.value.process,
+          Hours: hours,
+          StartTime: startStr,
+          EndTime: endStr
+        })
+        plannedCo = Number(resCo.data?.plannedHours ?? hours)
+      } catch (errCo) {
+        console.error('Failed to submit co-worker non-product assignment', errCo)
+      }
+    }
+
+    // Build message including both planned hours
+    let msg = `Non-Product Task assigned on ${nonProductTask.value.startDate}. Planned hours - ${nonProductTask.value.workerName}: ${plannedPrimary.toFixed(2)}.`
+    if (plannedCo !== null) msg += `; ${nonProductTask.value.coWorkerName}: ${plannedCo.toFixed(2)}`
+
+    alert(msg)
+
+    // refresh lists and reset form
+    showNonProduct.value = false
+    if (nonProductTask.value.workerName) await updateWorkerAssignments()
+    if (plannedCo !== null && nonProductTask.value.coWorkerName) {
+      // refresh co-worker assignments as well
+      const prevCo = nonProductTask.value.coWorkerName
+      nonProductTask.value.coWorkerName = ''
+      nonProductTask.value.coWorkerName = prevCo
+      // optional: call updateCoWorkerAssignments to refresh immediately
+      await updateCoWorkerAssignments()
+    }
+
+    nonProductTask.value.workerName = ''
+    nonProductTask.value.process = ''
+    nonProductTask.value.coWorkerName = ''
+  } catch (e) {
+    console.error('Failed to submit non-product task', e)
+    alert('Failed to assign non-product task: ' + (e.response?.data?.message || e.message))
+  }
+}
 </script>
 
 <style scoped>
@@ -512,6 +685,18 @@ const groupedProducts = computed(() => {
 .assign-btn:hover { background: linear-gradient(90deg, #D45500 0%, #EC6602 100%); transform: translateY(-1px); }
 
 .all-products-section { margin-top: 3vw; background: #fff; border-radius: 14px; box-shadow: 0 3px 14px rgba(236,102,2,0.12); padding: 1.5vw 1vw 2vw 1vw; border: 1px solid #f2c7a6; }
+.all-products-header { position: relative; display:flex; align-items:center; }
+.all-products-header h3 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; }
+.all-products-header .add-nonproduct-btn { margin-left: auto }
+.add-nonproduct-btn { background:#f3f4f6; border:1px solid #ddd; padding:6px 10px; border-radius:6px; cursor:pointer }
+.add-nonproduct-btn .arrow{ margin-left:8px }
+.non-product-panel { background: #fff; border: 1px solid #eee; padding: 16px; border-radius: 8px; margin-top: 12px }
+.non-product-header { position: relative; display:flex; align-items:center; gap:8px; }
+.non-product-header h3 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; }
+.back-btn { background:transparent; border:none; font-size:18px; cursor:pointer }
+.non-product-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1vw 2vw; align-items: end; margin-bottom: 1vw; }
+.non-product-grid input, .non-product-grid select { text-align: left; }
+/* .non-product-grid .full-row { grid-column: 1 / -1; } */
 .modern-vxe-table { border-radius: 12px; overflow: hidden; font-size: 1.05em; background: #fff; }
 .vxe-table--border .vxe-header--row th { background: #FFE6D3; color: #A64E00; font-weight: 700; }
 .vxe-table--border .vxe-body--row { background: #fff; }
