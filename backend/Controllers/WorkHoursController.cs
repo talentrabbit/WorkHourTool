@@ -96,7 +96,6 @@ namespace backend.Controllers
                 id = workHour.Id,
                 workerName = workHour.WorkerName,
                 plannedHours = workHour.PlannedHours,
-                PlannedHours = workHour.PlannedHours, //for frontend compatibility.
                 StartTime = workHour.StartTime,
                 EndTime = workHour.EndTime
             });
@@ -172,7 +171,9 @@ namespace backend.Controllers
                     ProcessName = n.ProcessName,
                     StartTime = n.StartTime,
                     EndTime = n.EndTime,
-                    NcmHour = (n.EndTime - n.StartTime).TotalHours,
+                    // prefer stored NcmHours if present, otherwise compute from timestamps
+                    NcmHours = n.NcmHours,
+                    NcmHour = n.NcmHours > 0 ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
                     State = n.State,
                     NcmAction = n.NcmAction
                 })
@@ -200,7 +201,7 @@ namespace backend.Controllers
                     NcmTimeOverall = db.NcmTimes
                         .Where(nt => nt.ProductId == p.Id)
                         .ToList() // Fetch NcmTimes into memory
-                        .Sum(nt => (nt.EndTime - nt.StartTime).TotalHours)
+                        .Sum(nt => nt.NcmHours > 0 ? nt.NcmHours : (nt.EndTime - nt.StartTime).TotalHours)
                 })
                 .ToList();
 
@@ -212,6 +213,25 @@ namespace backend.Controllers
         [HttpGet("all-worker-names")]
         public IActionResult GetAllWorkerNames()
         {
+            try
+            {
+                using var db = new AppDbContext();
+                var names = db.Users
+                    .AsNoTracking()
+                    .Where(u => !string.IsNullOrWhiteSpace(u.FullName) && !string.IsNullOrWhiteSpace(u.Role) && u.Role.ToLower().Contains("worker"))
+                    .Select(u => u.FullName!)
+                    .Distinct()
+                    .OrderBy(n => n)
+                    .ToArray();
+
+                if (names != null && names.Length > 0) return Ok(names);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to fetch worker names from Users table");
+            }
+
+            // fallback to configured list if DB lookup fails or returns nothing
             return Ok(_workerNames);
         }
 
@@ -226,9 +246,28 @@ namespace backend.Controllers
         [HttpGet("all-process-engineer-names")]
         public IActionResult GetProcessEngineerNames()
         {
+            try
+            {
+                using var db = new AppDbContext();
+                var names = db.Users
+                    .AsNoTracking()
+                    .Where(u => !string.IsNullOrWhiteSpace(u.FullName) && !string.IsNullOrWhiteSpace(u.Role) && (u.Role.ToLower().Contains("engineer") || u.Role.ToLower().Contains("process")))
+                    .Select(u => u.FullName!)
+                    .Distinct()
+                    .OrderBy(n => n)
+                    .ToArray();
+
+                if (names != null && names.Length > 0) return Ok(names);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to fetch process engineer names from Users table");
+            }
+
+            // fallback to configured list if DB lookup fails or returns nothing
             return Ok(_processEngineerNames);
         }
-
+        
         // GET: api/WorkHours/worker-assignments?workerName=...
         [HttpGet("worker-assignments")]
         public IActionResult GetWorkerAssignments([FromQuery] string workerName)
@@ -313,7 +352,7 @@ namespace backend.Controllers
                     ProcessName = n.ProcessName,
                     StartTime = n.StartTime,
                     EndTime = n.EndTime,
-                    NcmHour = (n.EndTime - n.StartTime).TotalHours,
+                    NcmHour = (n.NcmHours > 0) ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
                     State = n.State,
                     NcmAction = n.NcmAction
                 })
@@ -387,17 +426,29 @@ namespace backend.Controllers
         public IActionResult UpdateNcmTimeByRoot(int id, [FromBody] UpdateNcmTimeDto dto)
         {
             using var db = new AppDbContext();
-            var nt = db.NcmTimes.FirstOrDefault(x => x.Id == id);
+            var nt = db.NcmTimes.FirstOrDefault(n => n.Id == id);
             if (nt == null)
             {
-                return NotFound(new { message = $"NcmTime {id} not found" });
+                return NotFound(new { message = $"NcmTime id {id} not found" });
             }
+
+            // update only provided fields
             if (dto.ProcessName != null) nt.ProcessName = dto.ProcessName;
             if (dto.ProcessEngineer != null) nt.ProcessEngineer = dto.ProcessEngineer;
             if (dto.NcmAction != null) nt.NcmAction = dto.NcmAction;
             if (!string.IsNullOrWhiteSpace(dto.State)) nt.State = dto.State;
+
+            if (dto.StartTime.HasValue) nt.StartTime = dto.StartTime.Value;
+            if (dto.EndTime.HasValue) nt.EndTime = dto.EndTime.Value;
+
+            // validate timestamps
+            if (nt.EndTime <= nt.StartTime)
+            {
+                return BadRequest(new { message = "EndTime must be later than StartTime" });
+            }
+
             db.SaveChanges();
-            return Ok(new { message = "NcmTime updated" });
+            return Ok(new { message = "NcmTime updated", id = nt.Id });
         }
 
         // DELETE: api/NcmTimes/{id}
@@ -426,7 +477,7 @@ namespace backend.Controllers
 
             target.State = "Working";
             target.WorkerName = req.WorkerName;
-            if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.UtcNow;
+            if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.Now;
             db.SaveChanges();
 
             return Ok(new { message = "WorkHour state of updated", id = target.Id, state = target.State, workerName = target.WorkerName });
@@ -461,10 +512,34 @@ namespace backend.Controllers
 
             target.State = "Working";
             target.WorkerName = req.WorkerName;
-            if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.UtcNow;
+            if (!target.StartTimeActual.HasValue) target.StartTimeActual = DateTime.Now;
             db.SaveChanges();
 
             return Ok(new { message = "WorkHour state updated", id = target.Id, state = target.State, workerName = target.WorkerName });
+        }
+
+        // POST: api/WorkHours/reset
+        [HttpPost("reset")]
+        public IActionResult ResetWorkHour([FromBody] ResetWorkHourRequest req)
+        {
+            if (req == null) return BadRequest(new { message = "Request body required" });
+            using var db = new AppDbContext();
+            var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
+            if (wh == null) return NotFound(new { message = "WorkHour not found" });
+
+            // Only allow reset when WorkHour is in Working or NotStarted. Reject when already Completed or other terminal states.
+            if (wh.State != "Working" && wh.State != "NotStarted")
+            {
+                return BadRequest(new { message = $"Cannot reset WorkHour in state '{wh.State}'" });
+            }
+
+            // Reset actual timestamps and state so UI can start timers again
+            wh.State = "NotStarted";
+            wh.StartTimeActual = null;
+            wh.EndTimeActual = null;
+            db.SaveChanges();
+
+            return Ok(new { message = "WorkHour reset", id = wh.Id });
         }
 
         // POST: api/WorkHours/complete
@@ -483,49 +558,104 @@ namespace backend.Controllers
             }
 
             wh.State = "Completed";
-            wh.EndTimeActual = DateTime.UtcNow;
+            wh.EndTimeActual = DateTime.Now;
             // optionally update WorkerName
             if (!string.IsNullOrWhiteSpace(req.WorkerName)) wh.WorkerName = req.WorkerName;
 
-            // If NCM time reported, insert an NcmTime record
-            if (req.NcmHours.HasValue && req.NcmHours.Value > 0)
-            {
-                // require ProcessEngineer to be provided when NCM time exists
-                if (string.IsNullOrWhiteSpace(req.ProcessEngineer)) return BadRequest(new { message = "ProcessEngineer is required when reporting NCM time" });
-                var ncm = new NcmTime
-                {
-                    ProcessEngineer = req.ProcessEngineer,
-                    ProcessName = wh.ProcessName,
-                    EndTime = DateTime.UtcNow,
-                    StartTime = DateTime.UtcNow.AddHours(-req.NcmHours.Value),
-                    ProductId = wh.ProductId,
-                    State = "Completed",
-                    NcmAction = req.NcmAction
-                };
-                db.NcmTimes.Add(ncm);
-            }
+            // NOTE: NCM reporting is no longer handled here. Use SaveNcmAndNotify API to create NCM records and notify engineers.
 
             db.SaveChanges();
             return Ok(new { message = "WorkHour completed", id = wh.Id, endTimeActual = wh.EndTimeActual });
         }
-
-        // POST: api/WorkHours/reset
-        [HttpPost("reset")]
-        public IActionResult ResetWorkHour([FromBody] ResetWorkHourRequest req)
+		
+		// GET: api/WorkHours/email-by-user?fullname=Full Name
+        [HttpGet("email-by-user")]
+        public IActionResult GetEmailByUserName([FromQuery] string fullName)
         {
-            if (req == null) return BadRequest(new { message = "Request body required" });
+            if (string.IsNullOrWhiteSpace(fullName)) return BadRequest(new { message = "fullname is required" });
             using var db = new AppDbContext();
-            var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
-            if (wh == null) return NotFound(new { message = "WorkHour not found" });
-
-            wh.State = "NotStarted";
-            wh.StartTimeActual = null;
-            wh.EndTimeActual = null;
-            db.SaveChanges();
-            return Ok(new { message = "WorkHour reset", id = wh.Id });
+            var user = db.Users.FirstOrDefault(u => u.FullName == fullName);
+            if (user == null || string.IsNullOrWhiteSpace(user.Mail)) return NotFound(new { message = "Email not found for user" });
+            return Ok(new { email = user.Mail });
         }
 
-        // GET: api/WorkHours/find-workhour-id?workerName=...&serialNo=...&startDate=yyyy-MM-dd
+        // POST: api/WorkHours/save-ncm-and-notify
+        [HttpPost("save-ncm-and-notify")]
+        public IActionResult SaveNcmAndNotify([FromBody] NcmSaveDto[] entries)
+        {
+            if (entries == null || entries.Length == 0) return BadRequest(new { message = "No NCM entries provided" });
+            var results = new System.Collections.Generic.List<object>();
+            using var db = new AppDbContext();
+            foreach (var e in entries)
+            {
+                try
+                {
+                    // resolve product by serial
+                    var product = !string.IsNullOrWhiteSpace(e.SerialNo) ? db.Products.FirstOrDefault(p => p.SerialNo == e.SerialNo) : null;
+                    int productId = product != null ? product.Id : 0;
+
+                    var start = e.StartTime ?? DateTime.Now;
+                    var end = e.EndTime ?? DateTime.Now;
+                    if (end <= start) end = start.AddHours(1);
+                    double hours = (end - start).TotalHours;
+
+                    var ncm = new NcmTime
+                    {
+                        ProcessEngineer = e.ProcessEngineer,
+                        ProcessName = e.ProcessName,
+                        StartTime = start,
+                        EndTime = end,
+                        NcmHours = hours,
+                        ProductId = productId,
+                        State = "Notified",
+                        NcmAction = e.NcmAction
+                    };
+                    db.NcmTimes.Add(ncm);
+                    db.SaveChanges();
+
+                    // try to find recipient email and send mail via Outlook COM
+                    var user = db.Users.FirstOrDefault(u => u.FullName == e.ProcessEngineer);
+                    string email = user?.Mail ?? string.Empty;
+                    var mailSent = false;
+                    string mailError = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(email))
+                    {
+                        try
+                        {
+                            // late-bound COM to Outlook to avoid hard reference
+                            var outlookType = Type.GetTypeFromProgID("Outlook.Application");
+                            if (outlookType != null)
+                            {
+                                dynamic outlook = Activator.CreateInstance(outlookType);
+                                dynamic mail = outlook.CreateItem(0); // olMailItem
+                                mail.To = email;
+                                mail.Subject = $"NCM Notification for {e.SerialNo ?? "unknown serial"}";
+                                mail.Body = $"Dear {e.ProcessEngineer},\n\nAn NCM record has been created for SerialNo: {e.SerialNo} (Process: {e.ProcessName}).\nStart: {start:yyyy-MM-dd HH:mm}, End: {end:yyyy-MM-dd HH:mm}, Hours: {hours:F2}\nAction: {e.NcmAction}\n\nPlease follow up accordingly.\n\n-- Factory System";
+                                mail.Send();
+                                mailSent = true;
+                            }
+                            else
+                            {
+                                mailError = "Outlook not available on server";
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            mailError = ex.Message;
+                        }
+                    }
+
+                    results.Add(new { id = ncm.Id, serial = e.SerialNo, mail = email, mailSent, mailError });
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new { error = ex.Message });
+                }
+            }
+            return Ok(new { message = "NCM saved and notifications attempted", results });
+        }
+		
+		// GET: api/WorkHours/find-workhour-id?workerName=...&serialNo=...&startDate=yyyy-MM-dd
         [HttpGet("find-workhour-id")]
         public IActionResult FindWorkHourId([FromQuery] string workerName, [FromQuery] string serialNo, [FromQuery] DateTime? startDate)
         {
@@ -600,6 +730,9 @@ namespace backend.Controllers
             public string? ProcessEngineer { get; set; }
             public string? NcmAction { get; set; }
             public string? State { get; set; }
+            // allow updating the timestamps from the UI
+            public DateTime? StartTime { get; set; }
+            public DateTime? EndTime { get; set; }
         }
 
         public class IdsRequest
@@ -623,6 +756,16 @@ namespace backend.Controllers
         public class ResetWorkHourRequest
         {
             public int WorkHourId { get; set; }
+        }
+
+        public class NcmSaveDto
+        {
+            public string? SerialNo { get; set; }
+            public string? ProcessEngineer { get; set; }
+            public string? ProcessName { get; set; }
+            public DateTime? StartTime { get; set; }
+            public DateTime? EndTime { get; set; }
+            public string? NcmAction { get; set; }
         }
     }
 }

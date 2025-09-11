@@ -88,20 +88,29 @@
     <div class="all-products-section modern-table">
       <h3>All Systems Production State</h3>
       <div v-if="allLoading" class="loading">Loading...</div>
-      <vxe-table v-else :data="allProducts" border stripe round class="modern-vxe-table">
-        <vxe-column field="serialNo" title="SerialNo" width="120" />
-        <vxe-column field="projectNo" title="ProjectNo" width="120" />
-        <vxe-column field="systemType" title="SystemType" width="120" />
-        <vxe-column field="productionState" title="Production State" width="150" />
-        <vxe-column field="workHourOverall" title="WorkHour Overall" width="150" />
-        <vxe-column field="ncmTimeOverall" title="NCM Time Overall" width="150" />
-      </vxe-table>
+      <div v-else>
+        <div v-for="group in groupedProducts" :key="group.systemType" class="system-group">
+          <div class="group-title">{{ group.systemType || 'Unknown' }}</div>
+          <vxe-table :data="group.rows" border stripe round class="modern-vxe-table">
+            <vxe-column field="serialNo" title="SerialNo" width="120">
+              <template #default="{ row }">
+                <span class="serial-link" @click="openProductFromSerial(row.serialNo)">{{ row.serialNo }}</span>
+              </template>
+            </vxe-column>
+            <vxe-column field="projectNo" title="ProjectNo" width="120" />
+            <vxe-column field="systemType" title="SystemType" width="120" />
+            <vxe-column field="productionState" title="Production State" width="150" />
+            <vxe-column field="workHourOverall" title="WorkHour Overall" width="150" />
+            <vxe-column field="ncmTimeOverall" title="NCM Time Overall" width="150" />
+          </vxe-table>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed, nextTick } from 'vue'
 import axios from 'axios'
 import { VXETable } from 'vxe-table'
 
@@ -260,6 +269,17 @@ async function searchProduct() {
   }
 }
 
+// New helper: open product info when clicking serial in All Products table
+async function openProductFromSerial(serial) {
+  if (!serial) return
+  serialNo.value = serial
+  await searchProduct()
+  // wait for DOM to update and then scroll Assign Task into view
+  await nextTick()
+  const el = document.querySelector('.product-info')
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 async function updateWorkerAssignments() {
   try {
     const res = await axios.get('/api/WorkHours/worker-assignments', {
@@ -366,7 +386,7 @@ async function assignTask() {
       EndTime: endStr
     })
     // Prefer server-returned planned hours when present (flattened response expected)
-    primaryPlanned = Number(resPrimary?.data?.plannedHours ?? resPrimary?.data?.PlannedHours ?? hours)
+    primaryPlanned = Number(resPrimary.data?.plannedHours ??  hours)
   } catch (e) {
     console.error('Failed to submit primary assignment', e)
   }
@@ -383,15 +403,15 @@ async function assignTask() {
         StartTime: startStr,
         EndTime: endStr
       })
-      coPlanned = Number(resCo?.data?.plannedHours ?? resCo?.data?.PlannedHours ?? hours)
+      coPlanned = Number(resCo.data?.plannedHours ?? hours)
     } catch (e) {
       console.error('Failed to submit co-worker assignment', e)
     }
   }
 
   // Build success message including planned hours for both workers and include start date
-  let msg = `Task assigned on ${task.value.startDate}. Planned hours - ${task.value.workerName}: ${primaryPlanned.toFixed(2)}`
-  if (coPlanned !== null) msg += `; ${task.value.coWorkerName}: ${coPlanned.toFixed(2)}`
+  let msg = `Task assigned on ${task.value.startDate}. Planned hours - ${task.value.workerName}: ${primaryPlanned.toFixed(2)}.`
+  if (coPlanned !== null)   msg += `; ${task.value.coWorkerName}: ${coPlanned.toFixed(2)}`
 
   alert(msg)
   if (task.value.workerName) await updateWorkerAssignments()
@@ -409,6 +429,27 @@ const isAssignDisabled = computed(() => {
     !task.value.startTime ||
     !task.value.endTime ||
     hasConflict.value
+})
+// grouped view by systemType for All Products area
+const groupedProducts = computed(() => {
+  try {
+    const groups = {}
+    const items = Array.isArray(allProducts.value) ? allProducts.value : []
+    for (const p of items) {
+      const key = (p && p.systemType) ? p.systemType : 'Unknown'
+      if (!groups[key]) groups[key] = []
+      groups[key].push(p)
+    }
+    const keys = Object.keys(groups).sort()
+    const out = []
+    for (const k of keys) {
+      out.push({ systemType: k, rows: groups[k] })
+    }
+    return out
+  } catch (err) {
+    console.error('groupedProducts error', err)
+    return []
+  }
 })
 </script>
 
@@ -479,4 +520,8 @@ const isAssignDisabled = computed(() => {
 .assign-grid .full-row { grid-column: 1 / -1; }
 .assign-grid .col-1-width { justify-self: start; width: calc((100% - 2vw) / 2); }
 .loading { padding: 0.5rem 0.25rem; color: #82451F; font-weight: 600; }
+/* Make serial number in All Products table look clickable */
+.serial-link { cursor: pointer; color: #EC6602; font-weight: 700; text-decoration: underline; }
+.system-group { margin-bottom: 1.25rem }
+.group-title { padding: 0.6rem 0.8rem; background: #FFF4E6; color: #8a4b1a; font-weight: 700; border-radius: 8px; margin-bottom: 0.5rem }
 </style>

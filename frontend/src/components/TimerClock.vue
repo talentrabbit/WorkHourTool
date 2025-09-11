@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch } from 'vue'
+import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed } from 'vue'
 import axios from 'axios'
 // Sync timer state with parent for disabling tabs
 const isCountingTimerActive = inject('isCountingTimerActive', null)
@@ -69,8 +69,90 @@ const currentWorkHourId = ref(null)
 const processEngineer = ref('')
 const ncmAction = ref('')
 const showNcmInputs = ref(false)
-// New: track whether the current timers have been submitted so UI can be dimmed and controls disabled
 const submitted = ref(false)
+
+// New: support multiple NCM entries and dropdown options
+const processEngineerOptions = ref([])
+const ncmRows = ref([{ processEngineer: '', ncmAction: '', sent: false }])
+const sendingNcms = ref(false)
+
+const availableCount = computed(() => {
+  return ncmRows.value.filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim()))).length
+})
+
+// Fetch process engineer names for the dropdown
+async function fetchProcessEngineers() {
+  try {
+    const res = await axios.get('/api/WorkHours/all-process-engineer-names')
+    processEngineerOptions.value = Array.isArray(res.data) ? res.data : []
+  } catch (err) {
+    console.error('Failed to fetch process engineer names', err)
+    processEngineerOptions.value = []
+  }
+}
+
+// Add a new empty NCM row
+function addNcmRow() {
+  ncmRows.value.push({ processEngineer: '', ncmAction: '', sent: false })
+}
+// Remove a row by index
+function removeNcmRow(index) {
+  if (index >= 0 && index < ncmRows.value.length) {
+    ncmRows.value.splice(index, 1)
+  }
+}
+
+// Send NCM rows to backend and attempt notifications
+async function sendNcms() {
+  if (!serialNo.value) {
+    alert('No SerialNo selected for NCM')
+    return
+  }
+  if (sendingNcms.value) return
+  // Remind user that the operation may take a while and can not be cancelled
+  if (!window.confirm('Sending NCMs may take a while and cannot be cancelled. Continue?')) {
+    return
+  }
+  // build payload from rows; include approximate Start/End from the current ncmTime
+  const end = new Date()
+  const start = new Date(Date.now() - (ncmTime.value || 0) * 1000)
+  const payload = ncmRows.value
+    .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim())))
+    .map(r => ({
+      SerialNo: serialNo.value,
+      ProcessEngineer: r.processEngineer && r.processEngineer.trim() ? r.processEngineer.trim() : null,
+      ProcessName: process.value || null,
+      StartTime: start.toISOString(),
+      EndTime: end.toISOString(),
+      NcmAction: r.ncmAction && r.ncmAction.trim() ? r.ncmAction.trim() : null
+    }))
+  if (!payload.length) {
+    alert('Please add at least one NCM entry to send')
+    return
+  }
+  try {
+    sendingNcms.value = true
+    const res = await axios.post('/api/WorkHours/save-ncm-and-notify', payload)
+    console.log('save-ncm-and-notify response', res.data)
+    // mark sent rows as sent (match by array order since backend returns results in same order)
+    let sentIndex = 0
+    for (let i = 0; i < ncmRows.value.length; i++) {
+      const r = ncmRows.value[i]
+      if (!r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim()))) {
+        // mark as sent
+        r.sent = true
+        sentIndex++
+      }
+    }
+    // optionally refresh aggregates
+    void fetchAggregates()
+  } catch (err) {
+    console.error('Failed to send NCMs', err)
+    alert('Failed to send NCMs')
+  } finally {
+    sendingNcms.value = false
+  }
+}
 
 // initialize from parent-provided id if available
 if (props.initialWorkHourId) {
@@ -87,6 +169,7 @@ watch(() => props.initialWorkHourId, (nv) => {
 onMounted(() => {
     // Only fetch aggregates on mount; do not toggle global isCountingTimerActive here
     void fetchAggregates()
+    void fetchProcessEngineers()
 })
 onBeforeUnmount(() => {
   // ensure we clear local timer and global flag if active
@@ -154,11 +237,6 @@ function startClock(type) {
   // If starting NCM clock, show inputs for Process Engineer and Action
   if (type === 'ncm') {
     showNcmInputs.value = true
-    // gentle reminder if empty
-    if (!processEngineer.value) {
-      console.info('Please enter Process Engineer name for NCM time. The name will be stored when submitting.')
-      setTimeout(() => { if (!processEngineer.value) alert('Please enter Process Engineer name (visible beside NCM timer).') }, 250)
-    }
   }
 }
 
@@ -302,14 +380,23 @@ watch(serialNo, (nv, ov) => {
     <div v-if="showNcmInputs" class="ncm-panel">
       <div class="ncm-panel-header">NCM Details</div>
       <div class="ncm-inputs">
-        <div class="ncm-input-row">
+        <div v-for="(row, idx) in ncmRows" :key="idx" class="ncm-input-row">
           <label class="ncm-input-label">Process Engineer:</label>
-          <input v-model="processEngineer" class="ncm-input" placeholder="Enter name" />
+          <select v-model="row.processEngineer" class="ncm-input" :disabled="row.sent">
+            <option value="">-- Select --</option>
+            <option v-for="(opt, i) in processEngineerOptions" :key="i" :value="opt">{{ opt }}</option>
+          </select>
+
+          <label class="ncm-input-label" style="flex:0 0 120px;">NCM Action:</label>
+          <input v-model="row.ncmAction" class="ncm-input" placeholder="Enter action" :disabled="row.sent" />
+
+          <button class="ncm-row-btn" @click="removeNcmRow(idx)" title="Remove" v-if="ncmRows.length > 1 && !row.sent">-</button>
+          <button class="ncm-row-btn" @click="addNcmRow" title="Add" v-if="idx === ncmRows.length - 1">+</button>
+          <span v-if="row.sent" class="ncm-sent-badge">Sent</span>
         </div>
-        <div class="ncm-input-row">
-          <label class="ncm-input-label">NCM Action:</label>
-          <input v-model="ncmAction" class="ncm-input" placeholder="Enter action" />
-        </div>
+      </div>
+      <div style="margin-top:1rem; text-align:center;">
+        <button class="submit-btn" @click="sendNcms" :disabled="sendingNcms || availableCount === 0">Send NCM</button>
       </div>
     </div>
   </div>
@@ -535,4 +622,37 @@ watch(serialNo, (nv, ov) => {
   color: #e74c3c;
   margin-bottom: 0.75rem;
 }
+/* Ensure NCM panel's submit button uses normal flow (not the top-level absolute .submit-btn) */
+.ncm-panel .submit-btn {
+  position: static;
+  left: auto;
+  transform: none;
+  min-width: 140px;
+  display: inline-block;
+  margin: 0 auto;
+}
+.ncm-row-btn {
+  background: #e1f5fe;
+  color: #01579b;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5em 1em;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-left: 0.5em;
+}
+.ncm-row-btn:hover {
+  background: #b3e5fc;
+}
+.ncm-sent-badge {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 4px;
+  padding: 0.2em 0.5em;
+  font-size: 0.85em;
+  margin-left: 0.5em;
+  align-self: center;
+}
 </style>
+

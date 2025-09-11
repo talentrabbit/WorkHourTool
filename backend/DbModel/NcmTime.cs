@@ -11,7 +11,8 @@ namespace backend.DbModel
         public DateTime EndTime { get; set; }
         public int ProductId { get; set; }
         public Product? Product { get; set; }
-        public double NcmHour => (EndTime - StartTime).TotalHours;
+        // allow null when NcmHours not recorded in DB
+        public double? NcmHours { get; set; }
 
         // State of the NcmTime entry: NotStarted, Working, Completed, etc.
         public string State { get; set; } = "NotStarted";

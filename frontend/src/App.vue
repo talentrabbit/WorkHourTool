@@ -17,6 +17,7 @@
         <nav>
           <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Production Planning</router-link>
           <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
+          <router-link v-if="isProcess || isAdmin" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
           <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">WorkHour Maintenance</router-link>
         </nav>
       </aside>
@@ -29,7 +30,7 @@
         <!-- show modal when actively logging on, otherwise keep the translucent shim to dim the body -->
         <div v-if="showLogon" class="logon-modal">
           <h2>Sign in</h2>
-          <p class="logon-desc">Enter your account (DOMAIN\\username or username) to continue.</p>
+          <p class="logon-desc">Enter your full name (Zhang San) to continue.</p>
           <input v-model="logonName" class="logon-input" placeholder="DOMAIN\\username or username" @keyup.enter="doLogon" />
           <div class="logon-actions">
             <button class="btn" @click="doLogon">Log in</button>
@@ -41,7 +42,7 @@
 
     </div>
     <footer class="portal-footer">
-      <span>© 2025 SSME MI • Internal Portal</span>
+      <span>© 2025 SSME MI • Factory Portal</span>
     </footer>
   </div>
 </template>
@@ -69,6 +70,11 @@ const router = useRouter()
 const isWorker = computed(() => (userRole.value || '').toLowerCase() === 'worker')
 const isManager = computed(() => (userRole.value || '').toLowerCase() === 'productionmanager')
 const isAdmin = computed(() => (userRole.value || '').toLowerCase() === 'administrator')
+// Process role (accept both 'process' and 'processengineer' values returned by find-user)
+const isProcess = computed(() => {
+  const r = (userRole.value || '').toLowerCase()
+  return r === 'process' || r === 'processengineer'
+})
 
 // Logon UI state
 const logonName = ref('')

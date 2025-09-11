@@ -101,10 +101,24 @@ async function resolveWorkHourId(serial, processName) {
   try {
     const worker = matchedWorkerName.value || username.value || 'Guest'
     // Prefer using the assignment's start date if present
-    let startDateStr = new Date().toISOString().slice(0,10)
+    // Helper: format a Date (or date-string) as local YYYY-MM-DD (use wall-clock local date)
+    const formatLocalYMD = (dInput) => {
+      const d = (dInput instanceof Date) ? dInput : new Date(dInput)
+      if (isNaN(d.getTime())) return ''
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+
+    // Default to today's local date
+    let startDateStr = formatLocalYMD(new Date())
     const assign = todayAssignments.value.find(a => a.serialNo === serial && (!processName || ((a.processName || a.process || '') || '').toLowerCase().includes((processName || '').toLowerCase())))
     if (assign && assign.startTime) {
-      startDateStr = new Date(assign.startTime).toISOString().slice(0,10)
+      console.info("assign start time is", assign.startTime)
+      // string format expected: "2023-08-15"
+      startDateStr = formatLocalYMD(assign.startTime)
+      console.info("startDateStr is", startDateStr)
     }
     const res = await axios.get('/api/WorkHours/find-workhour-id', { params: { workerName: worker, serialNo: serial, startDate: startDateStr } })
     if (res && res.data && (res.data.id !== undefined && res.data.id !== null)) {
@@ -120,8 +134,9 @@ async function resolveWorkHourId(serial, processName) {
 
 function onAssignmentClick(params) {
   const row = params?.row || params
-  // Ignore clicks on completed assignments
-  if (row?.state === 'Completed') return
+  // Ignore clicks on completed assignments (case-insensitive)
+  const isCompleted = (row?.state || '').toString().toLowerCase() === 'completed'
+  if (isCompleted) return
   if (row?.serialNo) selectedSerial.value = row.serialNo
   selectedProcess.value = row?.processName || row?.process || ''
   // try resolve work hour id for this selection
@@ -134,9 +149,10 @@ function onAssignmentCellClick(params) {
   const col = params?.column
   // If the clicked column is the SerialNo column, treat it as selection
   const prop = col?.property || col?.field || ''
+  const isCompletedCell = (row?.state || '').toString().toLowerCase() === 'completed'
   if (prop === 'serialNo') {
     // ignore clicks when already completed
-    if (row?.state === 'Completed') return
+    if (isCompletedCell) return
     if (row?.serialNo) selectedSerial.value = row.serialNo
     selectedProcess.value = row?.processName || row?.process || ''
     // resolve id for selection
@@ -151,7 +167,9 @@ function onAssignmentCellClick(params) {
 
 // Helper used by the State column button to start work for a row
 function startWorkFromRow(row) {
-  if (!row || row.state === 'Completed') return
+  if (!row) return
+  // Prevent starting work for completed rows (case-insensitive)
+  if ((row.state || '').toString().toLowerCase() === 'completed') return
   try {
     selectedSerial.value = row.serialNo
     selectedProcess.value = row.processName || row.process || ''

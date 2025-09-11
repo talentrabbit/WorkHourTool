@@ -6,6 +6,7 @@ import Main from './components/Main.vue'
 import WorkHourTool from './components/WorkHourTool.vue'
 import Planning from './components/Planning.vue'
 import WorkHourMaintenance from './components/WorkHourMaintenance.vue'
+import Ncm from './components/Ncm.vue'
 import VXETable from 'vxe-table'
 import 'vxe-table/lib/style.css'
 import axios from 'axios';
@@ -16,6 +17,7 @@ const routes = [
   { path: '/worker', component: WorkHourTool },
   { path: '/planning', component: Planning },
   { path: '/maintenance', component: WorkHourMaintenance }
+  , { path: '/ncm', component: Ncm }
 ]
 
 const router = createRouter({
