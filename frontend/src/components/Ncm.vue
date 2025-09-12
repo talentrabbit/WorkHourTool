@@ -28,7 +28,9 @@
               <td>{{ row.systemType }}</td>
               <td v-if="showAll">{{ row.processEngineer }}</td>
               <td>{{ row.processName }}</td>
-              <td>{{ formatNcmHours(row.ncmHours, row.startTime, row.endTime) }}</td>
+              <td>
+                <input type="number" v-model.number="row.ncmHours" step="0.001" placeholder="" />
+              </td>
               <td>
                 <input type="datetime-local" v-model="row._startLocal" />
               </td>
@@ -130,7 +132,8 @@ async function updateRow(row) {
     StartTime: fromLocalInput(row._startLocal),
     EndTime: fromLocalInput(row._endLocal),
     State: row.state,
-    NcmAction: row.ncmAction
+    NcmAction: row.ncmAction,
+    NcmHours: (row.ncmHours !== undefined && row.ncmHours !== null) ? Number(row.ncmHours) : (null)
   }
   try {
     await axios.put(`/api/NcmTimes/${row.id}`, payload)

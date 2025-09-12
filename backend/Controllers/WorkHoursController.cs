@@ -271,7 +271,7 @@ namespace backend.Controllers
         // GET: api/WorkHours/worker-assignments?workerName=...
         [HttpGet("worker-assignments")]
         public IActionResult GetWorkerAssignments([FromQuery] string workerName)
-        {
+        {                   
             if (string.IsNullOrWhiteSpace(workerName))
             {
                 return BadRequest(new { message = "workerName is required" });
@@ -282,9 +282,16 @@ namespace backend.Controllers
                 .Include(w => w.Product)
                 .Where(w => w.WorkerName == workerName);
 
-            var result = query
+            // Materialize the workhours for the worker first to avoid EF Core translation issues with complex correlated subqueries
+            var rows = query
                 .OrderByDescending(w => w.StartTime)
-                .Select(w => new
+                .ToList();
+            
+            _logger.LogInformation("Fetching work assignments for WorkerName: {WorkerName}", workerName);
+
+            // Build the result in-memory; for each row, perform a small lookup to find an associated co-worker if present
+            var result = rows.Select(w =>
+                new
                 {
                     SerialNo = w.Product != null ? w.Product.SerialNo : null,
                     SystemType = w.Product != null ? w.Product.SystemType : null,
@@ -292,16 +299,17 @@ namespace backend.Controllers
                     State = w.State,
                     StartTime = w.StartTime,
                     EndTime = w.EndTime,
-                    CoWorkerName = db.WorkHours
-                        .Where(o => o.ProductId == w.ProductId
-                                    && o.ProcessName == w.ProcessName
-                                    && o.StartTime == w.StartTime
-                                    && o.EndTime == w.EndTime
-                                    && o.WorkerName != w.WorkerName)
-                        .Select(o => o.WorkerName)
-                        .FirstOrDefault()
-                })
-                .ToList();
+                    CoWorkerName = db.WorkHours.AsNoTracking()
+                    .Where(o => o.ProductId == w.ProductId
+                                && o.ProcessName == w.ProcessName
+                                && o.StartTime == w.StartTime
+                                && o.EndTime == w.EndTime
+                                && o.WorkerName != w.WorkerName)
+                    .Select(o => o.WorkerName)
+                    .FirstOrDefault()
+                }
+            ).ToList();
+            _logger.LogInformation("Fetched {Count} assignments for WorkerName: {WorkerName}", result.Count, workerName);
 
             return Ok(result);
         }

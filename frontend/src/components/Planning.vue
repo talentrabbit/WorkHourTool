@@ -5,7 +5,7 @@
       <input v-model="serialNo" @keydown.enter="searchProduct" placeholder="Enter SerialNo" class="search-input" />
       <button @click="searchProduct" class="search-btn">Search</button>
     </div>
-    <div v-if="product" class="product-info">
+    <div v-if="product&&!showNonProduct" class="product-info">
       <h3>Product Info</h3>
       <div class="product-grid">
         <div><strong>SerialNo:</strong> {{ product.serialNo }}</div>
@@ -88,8 +88,9 @@
     <div class="all-products-section modern-table" v-if="!showNonProduct">
       <div class="all-products-header">
         <h3>All Systems Production State</h3>
-        <button class="add-nonproduct-btn" @click="openNonProductPanel">
-          Add Non-Product Task <span class="arrow">→</span>
+        <button class="add-nonproduct-btn switch-btn" @click="openNonProductPanel" aria-label="Open Non-Product Task panel">
+          <span class="switch-label">Add Non-Product Task</span>
+          <span class="forward-arrow" aria-hidden="true">→</span>
         </button>
       </div>
       <div v-if="allLoading" class="loading">Loading...</div>
@@ -115,7 +116,10 @@
     <!-- Non-Product Task Panel -->
     <div class="non-product-panel" v-if="showNonProduct">
       <div class="non-product-header">
-        <button class="back-btn" @click="closeNonProductPanel">←</button>
+        <button class="back-btn switch-btn" @click="closeNonProductPanel" aria-label="Back to Products">
+          <span class="back-arrow" aria-hidden="true">←</span>
+          <span class="switch-label">Back to Products</span>
+        </button>
         <h3>Non-Product Task</h3>
       </div>
       <div class="assign-grid non-product-grid">
@@ -160,8 +164,34 @@
         <button @click="assignNonProductTask" class="assign-btn" :disabled="isNonProductAssignDisabled">Assign</button>
         <button @click="closeNonProductPanel" class="cancel-btn" style="margin-left:8px;">Cancel</button>
       </div>
-    </div>
 
+      <div v-if="nonHasConflict" class="error" style="margin-top:8px;">Selected time range conflicts with an existing assignment for {{ nonConflictFor }}.</div>
+
+      <div v-if="nonProductTask.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
+        <h4>Assignments for {{ nonProductTask.workerName }}</h4>
+        <vxe-table :data="nonProductExistingAssignments" border stripe round class="modern-vxe-table">
+          <vxe-column field="serialNo" title="SerialNo" width="120" />
+          <vxe-column field="systemType" title="SystemType" width="140" />
+          <vxe-column field="processName" title="Process" width="160" />
+          <vxe-column field="coWorkerName" title="Co-worker" width="160" />
+          <vxe-column field="startTime" title="Start Time" width="180" />
+          <vxe-column field="endTime" title="End Time" width="180" />
+        </vxe-table>
+      </div>
+
+      <div v-if="nonProductTask.coWorkerName && nonProductTask.coWorkerName !== nonProductTask.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
+        <h4>Assignments for {{ nonProductTask.coWorkerName }}</h4>
+        <vxe-table :data="nonCoWorkerAssignments" border stripe round class="modern-vxe-table">
+          <vxe-column field="serialNo" title="SerialNo" width="120" />
+          <vxe-column field="systemType" title="SystemType" width="140" />
+          <vxe-column field="processName" title="Process" width="160" />
+          <vxe-column field="coWorkerName" title="Co-worker" width="160" />
+          <vxe-column field="startTime" title="Start Time" width="180" />
+          <vxe-column field="endTime" title="End Time" width="180" />
+        </vxe-table>
+      </div>
+
+    </div>
   </div>
 </template>
 
@@ -190,8 +220,12 @@ const workerNames = ref([])
 const processNames = ref([])
 const existingAssignments = ref([])
 const coWorkerAssignments = ref([]) // new: assignments for selected co-worker
+const nonProductExistingAssignments = ref([]) // assignments for non-product task worker
+const nonCoWorkerAssignments = ref([]) // assignments for non-product task co-worker
 const hasConflict = ref(false)
+const nonHasConflict = ref(false)
 const conflictFor = ref('') // new: who has the conflict
+const nonConflictFor = ref("") // who has conflict for non-product task
 
 const showNonProduct = ref(false)
 const nonProductTask = ref({
@@ -303,22 +337,69 @@ function recomputeConflict() {
   conflictFor.value = ''
 }
 
+function recomputeNonProductConflict() {
+  const r = currentRangeNon()
+  if (!r) { nonHasConflict.value = false; nonConflictFor.value = ''; return }
+
+  // Check primary worker
+  if (nonProductExistingAssignments.value && nonProductExistingAssignments.value.length) {
+    const conflictMain = nonProductExistingAssignments.value.some(a => {
+      const s = new Date(a.startTime)
+      const e = new Date(a.endTime)
+      return Math.max(r.start.getTime(), s.getTime()) < Math.min(r.end.getTime(), e.getTime())
+    })
+    if (conflictMain) { nonHasConflict.value = true; nonConflictFor.value = nonProductTask.value.workerName; return }
+  }
+
+  // Check co-worker
+  if (nonCoWorkerAssignments.value && nonCoWorkerAssignments.value.length && nonProductTask.value.coWorkerName && nonProductTask.value.coWorkerName !== nonProductTask.value.workerName) {
+    const conflictCo = nonCoWorkerAssignments.value.some(a => {
+      const s = new Date(a.startTime)
+      const e = new Date(a.endTime)
+      return Math.max(r.start.getTime(), s.getTime()) < Math.min(r.end.getTime(), e.getTime())
+    })
+    if (conflictCo) { nonHasConflict.value = true; nonConflictFor.value = nonProductTask.value.coWorkerName; return }
+  }
+
+  nonHasConflict.value = false
+  nonConflictFor.value = ''
+}
+
 watch(() => [task.value.startDate, task.value.startTime, task.value.endDate, task.value.endTime], recomputeConflict)
 watch(existingAssignments, recomputeConflict)
 watch(coWorkerAssignments, recomputeConflict)
+watch(() => nonProductTask.value.workerName, () => {
+  if (nonProductTask.value.workerName) updateNonProductWorkerAssignments()
+  else nonProductExistingAssignments.value = []
+  recomputeNonProductConflict()
+})
+watch(() => nonProductTask.value.coWorkerName, async () => {
+  if (nonProductTask.value.coWorkerName && nonProductTask.value.coWorkerName !== nonProductTask.value.workerName) {
+    await updateNonProductCoWorkerAssignments()
+  } else {
+    nonCoWorkerAssignments.value = []
+  }
+  recomputeNonProductConflict()
+})
+watch(() => [nonProductTask.value.startDate, nonProductTask.value.startTime, nonProductTask.value.endDate, nonProductTask.value.endTime], recomputeNonProductConflict)
 
 async function fetchAllProducts() {
   allLoading.value = true
   try {
     const res = await axios.get('/api/workhours/all-product-states')
     if (Array.isArray(res.data)) {
-      allProducts.value = res.data.map(p => ({
-        serialNo: p.serialNo,
-        projectNo: p.projectNo,
-        systemType: p.systemType,
-        productionState:  p.workingProcess,
-        workHourOverall: p.workHourOverall  ?? 0,
-        ncmTimeOverall: p.ncmTimeOverall  ?? 0
+      // exclude the placeholder non-product record (SerialNo '999999') so it doesn't appear in All Products
+      const items = res.data.filter(p => {
+        const sn = (p.serialNo ?? p.SerialNo ?? '').toString()
+        return sn !== '999999'
+      })
+      allProducts.value = items.map(p => ({
+        serialNo: p.serialNo ?? p.SerialNo,
+        projectNo: p.projectNo ?? p.ProjectNo,
+        systemType: p.systemType ?? p.SystemType,
+        productionState: p.workingProcess ?? p.WorkingProcess,
+        workHourOverall: p.workHourOverall ?? p.WorkHourOverall ?? 0,
+        ncmTimeOverall: p.ncmTimeOverall ?? p.NcmTimeOverall ?? 0
       }))
     } else {
       console.error('Expected an array but got:', res.data)
@@ -418,6 +499,57 @@ async function updateCoWorkerAssignments() {
   }
 }
 
+async function updateNonProductWorkerAssignments() {
+  try {
+    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: nonProductTask.value.workerName } })
+    if (Array.isArray(res.data)) {
+      const threshold = new Date()
+      threshold.setDate(threshold.getDate() - 2)
+      nonProductExistingAssignments.value = res.data
+        .filter(a => {
+          const s = a && a.startTime ? new Date(a.startTime) : null
+          return !s || s >= threshold
+        })
+        .map(a => ({
+          serialNo: a.serialNo,
+          systemType: a.systemType,
+          processName: a.processName,
+          coWorkerName: a.coWorkerName || '',
+          startTime: a.startTime,
+          endTime: a.endTime
+        }))
+        console.info(`Fetched ${nonProductExistingAssignments.value.length} assignments for non-product worker.`)
+    } else {
+      console.info('No assignments found for non-product worker.')
+      nonProductExistingAssignments.value = []
+    }
+  } catch (e) {
+    console.error('Error fetching non-product worker assignments', e)
+    nonProductExistingAssignments.value = []
+  }
+}
+
+async function updateNonProductCoWorkerAssignments() {
+  try {
+    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: nonProductTask.value.coWorkerName } })
+    if (Array.isArray(res.data)) {
+      nonCoWorkerAssignments.value = res.data.map(a => ({
+        serialNo: a.serialNo,
+        systemType: a.systemType,
+        processName: a.processName,
+        coWorkerName: a.coWorkerName || '',
+        startTime: a.startTime,
+        endTime: a.endTime
+      }))
+    } else {
+      nonCoWorkerAssignments.value = []
+    }
+  } catch (e) {
+    console.error('Error fetching non-product co-worker assignments', e)
+    nonCoWorkerAssignments.value = []
+  }
+}
+
 function overlapMs(aStart, aEnd, bStart, bEnd) {
   const start = Math.max(aStart.getTime(), bStart.getTime())
   const end = Math.min(aEnd.getTime(), bEnd.getTime())
@@ -513,7 +645,7 @@ const isAssignDisabled = computed(() => {
     hasConflict.value
 })
 const isNonProductAssignDisabled = computed(() => {
-  return !nonProductTask.value.workerName || !nonProductTask.value.process || !currentRangeNon()
+  return !nonProductTask.value.workerName || !nonProductTask.value.process || !currentRangeNon() || nonHasConflict.value
 })
 // grouped view by systemType for All Products area
 const groupedProducts = computed(() => {
@@ -605,7 +737,7 @@ async function assignNonProductTask() {
     alert(msg)
 
     // refresh lists and reset form
-    showNonProduct.value = false
+    //showNonProduct.value = false
     if (nonProductTask.value.workerName) await updateWorkerAssignments()
     if (plannedCo !== null && nonProductTask.value.coWorkerName) {
       // refresh co-worker assignments as well
@@ -690,13 +822,16 @@ async function assignNonProductTask() {
 .all-products-header .add-nonproduct-btn { margin-left: auto }
 .add-nonproduct-btn { background:#f3f4f6; border:1px solid #ddd; padding:6px 10px; border-radius:6px; cursor:pointer }
 .add-nonproduct-btn .arrow{ margin-left:8px }
+/* Prominent switch button shared style */
+.switch-btn { display: inline-flex; align-items: center; gap: 0.6rem; background: linear-gradient(90deg,#FFF4EA 0%,#FFF8F2 100%); border: 1px solid #F5D3B0; padding: 0.5rem 0.8rem; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(236,102,2,0.08); }
+.switch-btn:hover { transform: translateY(-2px); }
+.switch-label { font-weight: 700; color: #6b3b1f; }
+.forward-arrow, .back-arrow { display:inline-flex; align-items:center; justify-content:center; background: #FFF3E8; color: #EC6602; font-weight: 800; border-radius: 999px; padding: 0.25rem 0.5rem; font-size: 1.1rem; box-shadow: 0 2px 6px rgba(236,102,2,0.12); }
+.back-btn { background:transparent; border:none; font-size:18px; cursor:pointer; padding: 0; }
+.back-btn.switch-btn { padding: 0.2rem 0.5rem; }
 .non-product-panel { background: #fff; border: 1px solid #eee; padding: 16px; border-radius: 8px; margin-top: 12px }
 .non-product-header { position: relative; display:flex; align-items:center; gap:8px; }
 .non-product-header h3 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; }
-.back-btn { background:transparent; border:none; font-size:18px; cursor:pointer }
-.non-product-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1vw 2vw; align-items: end; margin-bottom: 1vw; }
-.non-product-grid input, .non-product-grid select { text-align: left; }
-/* .non-product-grid .full-row { grid-column: 1 / -1; } */
 .modern-vxe-table { border-radius: 12px; overflow: hidden; font-size: 1.05em; background: #fff; }
 .vxe-table--border .vxe-header--row th { background: #FFE6D3; color: #A64E00; font-weight: 700; }
 .vxe-table--border .vxe-body--row { background: #fff; }
