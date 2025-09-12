@@ -38,6 +38,13 @@ function formatTime(sec) {
   return `${h}:${m}:${ss}`
 }
 
+// Format a Date into a local ISO-like string (YYYY-MM-DDTHH:mm:ss) so backend receives local time instead of UTC (no trailing Z)
+function formatLocalIso(dt) {
+  if (!dt) return null
+  const pad = n => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`
+}
+
 // fetch aggregates for current serial
 async function fetchAggregates() {
   if (!serialNo.value) return
@@ -122,8 +129,9 @@ async function sendNcms() {
       SerialNo: serialNo.value,
       ProcessEngineer: r.processEngineer && r.processEngineer.trim() ? r.processEngineer.trim() : null,
       ProcessName: process.value || null,
-      StartTime: start.toISOString(),
-      EndTime: end.toISOString(),
+      // send local time string (no Z) instead of Date object which serializes as UTC
+      StartTime: formatLocalIso(start),
+      EndTime: formatLocalIso(end),
       NcmAction: r.ncmAction && r.ncmAction.trim() ? r.ncmAction.trim() : null
     }))
   if (!payload.length) {

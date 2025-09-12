@@ -172,8 +172,7 @@ namespace backend.Controllers
                     StartTime = n.StartTime,
                     EndTime = n.EndTime,
                     // prefer stored NcmHours if present, otherwise compute from timestamps
-                    NcmHours = n.NcmHours,
-                    NcmHour = n.NcmHours > 0 ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
+                    NcmHours = n.NcmHours > 0 ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
                     State = n.State,
                     NcmAction = n.NcmAction
                 })
@@ -360,7 +359,7 @@ namespace backend.Controllers
                     ProcessName = n.ProcessName,
                     StartTime = n.StartTime,
                     EndTime = n.EndTime,
-                    NcmHour = (n.NcmHours > 0) ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
+                    NcmHours = (n.NcmHours > 0) ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
                     State = n.State,
                     NcmAction = n.NcmAction
                 })
@@ -448,6 +447,16 @@ namespace backend.Controllers
 
             if (dto.StartTime.HasValue) nt.StartTime = dto.StartTime.Value;
             if (dto.EndTime.HasValue) nt.EndTime = dto.EndTime.Value;
+            if (dto.NcmHours.HasValue)
+            {
+                if (dto.NcmHours.Value < 0) return BadRequest(new { message = "NcmHours cannot be negative" });
+                nt.NcmHours = dto.NcmHours.Value;
+            }
+            else
+            {
+                // fall back to recompute NcmHours from timestamps if not provided
+                nt.NcmHours = (dto.EndTime.Value - dto.StartTime.Value).TotalHours;
+            }
 
             // validate timestamps
             if (nt.EndTime <= nt.StartTime)
@@ -605,7 +614,7 @@ namespace backend.Controllers
                     var start = e.StartTime ?? DateTime.Now;
                     var end = e.EndTime ?? DateTime.Now;
                     if (end <= start) end = start.AddHours(1);
-                    double hours = (end - start).TotalHours;
+                    double hours = e.NcmHours > 0 ? e.NcmHours : (end - start).TotalHours;
 
                     var ncm = new NcmTime
                     {
@@ -620,6 +629,8 @@ namespace backend.Controllers
                     };
                     db.NcmTimes.Add(ncm);
                     db.SaveChanges();
+
+                    _logger.LogInformation("NCM record saved for SerialNo: {SerialNo}, \n{ncm}", e.SerialNo, ncm);
 
                     // try to find recipient email and send mail via Outlook COM
                     var user = db.Users.FirstOrDefault(u => u.FullName == e.ProcessEngineer);
@@ -741,6 +752,8 @@ namespace backend.Controllers
             // allow updating the timestamps from the UI
             public DateTime? StartTime { get; set; }
             public DateTime? EndTime { get; set; }
+
+            public double? NcmHours { get; set; }
         }
 
         public class IdsRequest
@@ -774,6 +787,8 @@ namespace backend.Controllers
             public DateTime? StartTime { get; set; }
             public DateTime? EndTime { get; set; }
             public string? NcmAction { get; set; }
+
+            public double NcmHours { get; set; }
         }
     }
 }

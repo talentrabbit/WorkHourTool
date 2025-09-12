@@ -1,7 +1,7 @@
 <template>
   <div class="ncm-container">
     <h2>NCM Time Maintenance</h2>
-    <p>{{ showAll ? 'All NCM listed' : 'Showing NCM records assigned to you (Process Engineer).' }}</p>
+    <p>{{ showAll ? 'All NCM listed' : 'Showing NCM records assigned to you (' + username + ').' }}</p>
     <div v-if="loading" class="loading">Loading...</div>
     <div v-else>
       <table class="ncm-table">
@@ -107,7 +107,10 @@ onMounted(async () => {
         processEngineer: r.processEngineer || '',
         systemType: r.systemType,
         processName: r.processName,
-        ncmHours: (r.NcmHours !== undefined ? r.NcmHours : (r.ncmHours !== undefined ? r.ncmHours : null)),
+        // Prefer backend's `NcmHour` (singular) which is returned by the API; fall back to other casings if present
+        ncmHours: (r.NcmHours !== undefined && r.NcmHours !== null) ? Number(r.NcmHours)
+                  : (r.ncmHours !== undefined && r.ncmHours !== null) ? Number(r.ncmHours)
+                  : null,
         startTime: r.startTime,
         endTime: r.endTime,
         state: r.state || '',
