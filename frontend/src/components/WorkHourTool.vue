@@ -8,6 +8,9 @@ const activeTab = ref('task')
 // Shared state for timer running
 const isCountingTimerActive = ref(false)
 provide('isCountingTimerActive', isCountingTimerActive)
+// Shared state to indicate the worker has submitted their work hour – used to keep some tabs disabled
+const isWorkSubmitted = ref(false)
+provide('isWorkSubmitted', isWorkSubmitted)
 
 // selected serial from assignments
 const selectedSerial = ref('')
@@ -244,14 +247,21 @@ function handleStartWork(payload) {
       <p>Track, analyze, and improve your department's productivity.</p>
     </div>
     <div class="nav-tabs-horizontal">
-      <button :class="{active: activeTab === 'task', disabled: isCountingTimerActive && activeTab === 'counting'}"
-              :disabled="isCountingTimerActive && activeTab === 'counting'"
-              @click="!isCountingTimerActive && (activeTab = 'task')">Task Arrangement</button>
-      <button :class="{active: activeTab === 'counting'}"
-              @click="activeTab = 'counting'">Work Hour Counting Tool</button>
-      <button :class="{active: activeTab === 'intro', disabled: isCountingTimerActive && activeTab === 'counting'}"
-              :disabled="isCountingTimerActive && activeTab === 'counting'"
-              @click="!isCountingTimerActive && (activeTab = 'intro')">Department Introduction</button>
+      <button
+        :class="{ active: activeTab === 'task', disabled: (isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted }"
+        :disabled="(isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted"
+        @click="!((isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted) && (activeTab = 'task')">
+        Task Arrangement
+      </button>
+
+      <button :class="{ active: activeTab === 'counting' }" @click="activeTab = 'counting'">Work Hour Counting Tool</button>
+
+      <button
+        :class="{ active: activeTab === 'intro', disabled: (isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted }"
+        :disabled="(isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted"
+        @click="!((isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted) && (activeTab = 'intro')">
+        Department Introduction
+      </button>
     </div>
     <div class="tab-content">
       <div v-if="activeTab === 'task'">
@@ -290,7 +300,7 @@ function handleStartWork(payload) {
       </div>
 
       <div v-if="activeTab === 'counting'">
-        <TimerClock v-show="activeTab === 'counting'" :serialNo="selectedSerial" :process="selectedProcess" :username="username" :initialWorkHourId="selectedWorkHourId" />
+        <TimerClock v-show="activeTab === 'counting'" :serialNo="selectedSerial" :process="selectedProcess" :username="username" :initialWorkHourId="selectedWorkHourId" @work-submitted="isWorkSubmitted = true" />
       </div>
       <div v-if="activeTab === 'intro'">
         <h2>Department Self-Introduction</h2>

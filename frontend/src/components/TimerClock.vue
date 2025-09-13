@@ -1,8 +1,9 @@
 <script setup>
-import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed } from 'vue'
+import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed, defineEmits } from 'vue'
 import axios from 'axios'
 // Sync timer state with parent for disabling tabs
 const isCountingTimerActive = inject('isCountingTimerActive', null)
+const isWorkSubmitted = inject('isWorkSubmitted', null)
 // inject username from parent/app so backend calls can include worker name
 const username = inject('username', ref('Guest'))
 
@@ -121,8 +122,8 @@ async function sendNcms() {
     return
   }
   // build payload from rows; include approximate Start/End from the current ncmTime
-  const end = new Date()
-  const start = new Date(Date.now() - (ncmTime.value || 0) * 1000)
+  const start = Date.now()
+  const end = Date.now()
   const payload = ncmRows.value
     .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim())))
     .map(r => ({
@@ -231,7 +232,6 @@ function startClock(type) {
   if (isCountingTimerActive) isCountingTimerActive.value = true
   timer = setInterval(() => {
     if (activeClock.value === 'work') workTime.value++
-    else if (activeClock.value === 'ncm') ncmTime.value++
   }, 1000)
 
   // If starting the work clock, ensure we have a WorkHour id but avoid extra lookup if parent provided it
@@ -241,11 +241,10 @@ function startClock(type) {
         await setWorkingBackend(currentWorkHourId.value)
       })()
   }
+}
 
-  // If starting NCM clock, show inputs for Process Engineer and Action
-  if (type === 'ncm') {
-    showNcmInputs.value = true
-  }
+function switchNcmInputs() {
+  showNcmInputs.value = !showNcmInputs.value
 }
 
 async function submitWorkHours() {
@@ -258,19 +257,20 @@ async function submitWorkHours() {
       return
     }
 
+    if (!window.confirm('This will submit your work hour, and the operation can not be revert! Continue?')) {
+      return
+    }
+
     // compute hours from timers (rounded to 2 decimals)
     const effectiveHours = Math.round((workTime.value / 3600) * 100) / 100
     const reportedNcmHours = Math.round((ncmTime.value / 3600) * 100) / 100
 
     // build payload
     const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest', EffectiveHours: effectiveHours }
-
-    // include NCM info if present
-    if (reportedNcmHours > 0) {
-      payload.NcmHours = reportedNcmHours
-      payload.ProcessEngineer = processEngineer.value || null
-      payload.NcmAction = ncmAction.value || null
-    }
+   
+    payload.ProcessEngineer = processEngineer.value || null
+    payload.NcmAction = ncmAction.value || null
+    
 
     const res = await axios.post('/api/WorkHours/complete', payload)
     console.log('Complete response', res.data)
@@ -283,6 +283,10 @@ async function submitWorkHours() {
     // keep timers and NCM metadata visible but mark as submitted and dim UI
     submitted.value = true
     showNcmInputs.value = false
+    // notify parent that work was submitted so tabs can be disabled
+    if (isWorkSubmitted) isWorkSubmitted.value = true
+    // emit an event as well so parent can react if provide/inject didn't reach it
+    try { emit('work-submitted') } catch (e) { /* ignore in older runtimes */ }
 
     alert('Work hour completed.')
   } catch (err) {
@@ -370,13 +374,9 @@ watch(serialNo, (nv, ov) => {
       <div class="clock-block">
         <div class="clock-label">Effective Working Time</div>
         <div class="clock-time" :class="{active: activeClock === 'work', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
-        <button class="circle-wide-btn" :class="{active: activeClock === 'work', dimmed: isCountingTimerActive && activeClock !== 'work'}" :disabled="(isCountingTimerActive && activeClock !== 'work') || submitted" @click="startClock('work')" title="Work">Work</button>
+        <button class="circle-wide-btn" :class="{active: activeClock === 'work', dimmed: isCountingTimerActive && activeClock !== 'work'}" :disabled="submitted" @click="startClock('work')" title="Work">Work</button>
       </div>
-      <div class="clock-block">
-        <div class="clock-label">NCM Time</div>
-        <div class="clock-time" :class="{active: activeClock === 'ncm', 'submitted-dim': submitted}">{{ formatTime(ncmTime) }}</div>
-        <button class="circle-wide-btn" :class="[{active: activeClock === 'ncm', dimmed: isCountingTimerActive && activeClock !== 'ncm'}, {'ncm-active': activeClock === 'ncm'}, {'submitted-dim': submitted}]" :disabled="(isCountingTimerActive && activeClock !== 'ncm') || submitted" @click="startClock('ncm')" title="NCM">NCM</button>
-      </div>
+      
     </div>
     <div class="reset-btn-row">
       <span class="reset-btn-spacer"></span>
@@ -384,27 +384,32 @@ watch(serialNo, (nv, ov) => {
       <span class="reset-btn-spacer"></span>
       <button class="reset-btn" @click="resetClocks" title="Will reset all clocks!">⟳</button>
     </div>
-    <!-- Inline inputs for NCM metadata, shown when NCM timer is active -->
-    <div v-if="showNcmInputs" class="ncm-panel">
-      <div class="ncm-panel-header">NCM Details</div>
-      <div class="ncm-inputs">
-        <div v-for="(row, idx) in ncmRows" :key="idx" class="ncm-input-row">
-          <label class="ncm-input-label">Process Engineer:</label>
-          <select v-model="row.processEngineer" class="ncm-input" :disabled="row.sent">
-            <option value="">-- Select --</option>
-            <option v-for="(opt, i) in processEngineerOptions" :key="i" :value="opt">{{ opt }}</option>
-          </select>
-
-          <label class="ncm-input-label" style="flex:0 0 120px;">NCM Action:</label>
-          <input v-model="row.ncmAction" class="ncm-input" placeholder="Enter action" :disabled="row.sent" />
-
-          <button class="ncm-row-btn" @click="removeNcmRow(idx)" title="Remove" v-if="ncmRows.length > 1 && !row.sent">-</button>
-          <button class="ncm-row-btn" @click="addNcmRow" title="Add" v-if="idx === ncmRows.length - 1">+</button>
-          <span v-if="row.sent" class="ncm-sent-badge">Sent</span>
-        </div>
+    <!-- NCM panel: header always visible; inputs and Send button collapse/expand -->
+    <div class="ncm-panel">
+      <div class="ncm-panel-header" @click="switchNcmInputs" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between;">
+        <span>NCM Details</span>
+        <span class="chevron" :class="{ open: showNcmInputs }">▾</span>
       </div>
-      <div style="margin-top:1rem; text-align:center;">
-        <button class="submit-btn" @click="sendNcms" :disabled="sendingNcms || availableCount === 0">Send NCM</button>
+      <div class="ncm-collapse" :class="{ open: showNcmInputs }" :aria-expanded="showNcmInputs">
+        <div class="ncm-inputs">
+          <div v-for="(row, idx) in ncmRows" :key="idx" class="ncm-input-row">
+            <label class="ncm-input-label">Process Engineer:</label>
+            <select v-model="row.processEngineer" class="ncm-input" :disabled="row.sent">
+              <option value="">-- Select --</option>
+              <option v-for="(opt, i) in processEngineerOptions" :key="i" :value="opt">{{ opt }}</option>
+            </select>
+
+            <label class="ncm-input-label" style="flex:0 0 120px;">NCM Action:</label>
+            <input v-model="row.ncmAction" class="ncm-input" placeholder="Enter action" :disabled="row.sent" />
+
+            <button class="ncm-row-btn" @click="removeNcmRow(idx)" title="Remove" v-if="ncmRows.length > 1 && !row.sent">-</button>
+            <button class="ncm-row-btn" @click="addNcmRow" title="Add" v-if="idx === ncmRows.length - 1">+</button>
+            <span v-if="row.sent" class="ncm-sent-badge">Sent</span>
+          </div>
+        </div>
+        <div style="margin-top:1rem; text-align:center;">
+          <button class="submit-btn" @click="sendNcms" :disabled="sendingNcms || availableCount === 0">Send NCM</button>
+        </div>
       </div>
     </div>
   </div>
@@ -448,8 +453,8 @@ watch(serialNo, (nv, ov) => {
   border-radius: 8px;
   padding: 1.2em 2.5em;
   box-shadow: 0 2px 8px #0001;
-  flex: 1 1 35%;
-  max-width: 35%;
+  flex: 1 1 55%;
+  max-width: 55%;
   width: 100%;
 }
 .clock-label {
@@ -481,39 +486,65 @@ watch(serialNo, (nv, ov) => {
   gap: 2em;
 }
 .circle-wide-btn {
-  flex: 1 1 35%;
-  max-width: 60%;
-  min-width: 96px;
+  flex: 1 1 50%;
+  max-width: 260px; /* increased max width */
+  min-width: 140px; /* increased min width */
   aspect-ratio: 1 / 1;
-  height: auto;
+  height: 140px; /* explicit larger height to enlarge the circle */
   border-radius: 50%;
   border: none;
   background: #eee;
   color: #333;
-  font-size: 2em;
+  font-size: 2em; /* larger label */
   font-weight: bold;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   margin: 0;
-  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-  box-shadow: 0 1px 4px #0001;
-  width: 100%;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.08s;
+  box-shadow: 0 2px 8px #0002; /* slightly stronger shadow */
 }
+
+/* Toggle (pressed) state for the circular button */
 .circle-wide-btn.active {
   background: #42b883;
   color: #fff;
-  box-shadow: 0 2px 8px #42b88333;
+  box-shadow: 0 3px 10px #42b88333;
+  transform: translateY(1px) scale(0.98);
 }
-.circle-wide-btn.ncm-active {
-  background: #e74c3c !important;
-  color: #fff !important;
-  box-shadow: 0 2px 8px #e74c3c33 !important;
-}
-.circle-wide-btn:hover {
+
+/* Hover only when not active */
+.circle-wide-btn:not(.active):hover {
   background: #c2f0d3;
 }
+
+.rectangle-wide-btn {
+  background: #eee;
+  color: #333;
+  border: none;
+  border-radius: 8px;
+  padding: 0; /* remove horizontal padding so square sizing is consistent */
+  font-size: 1.1em;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 4px #0001;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.08s;
+  width: 150px; /* square size */
+  aspect-ratio: 1 / 1;
+  height: 48px;
+}
+
+.rectangle-wide-btn.active {
+  background: #e74c3c;
+  color: #fff;
+  box-shadow: 0 2px 8px #e74c3c33;
+  transform: translateY(1px) scale(0.98);
+}
+
 .circle-wide-btn:disabled, .circle-wide-btn.dimmed {
   opacity: 0.45;
   cursor: not-allowed;
@@ -552,13 +583,13 @@ watch(serialNo, (nv, ov) => {
    border-radius: 8px;
    min-width: 160px;
    min-height: 44px;
-   font-size: 1.1em;
+   font-size: 1em;
    border: none;
    box-shadow: 0 2px 8px #42b88333;
    display: flex;
    align-items: center;
    justify-content: center;
-   font-weight: bold;
+   font-weight: none;
    cursor: pointer;
    transition: background 0.2s;
  }
@@ -602,16 +633,19 @@ watch(serialNo, (nv, ov) => {
    flex-direction: row;
    gap: 1em;
    width: 100%;
+   font-size: 0.92rem; /* slightly smaller overall text */
+   padding: 0.28rem 0; /* small vertical padding */
+   align-items: center;
  }
  .ncm-input-label {
-   flex: 0 0 150px;
-   font-weight: bold;
-   align-self: center;
+   flex: 0 0 120px; /* slightly narrower label column */
+   font-weight: 700; /* keep emphasis but slightly smaller */
+   font-size: 0.92rem;
  }
  .ncm-input {
    flex: 1;
-   padding: 0.8em;
-   font-size: 1em;
+   padding: 0.45rem 0.5rem; /* more compact input padding */
+   font-size: 0.95rem; /* slightly smaller input text */
    border: 1px solid #ccc;
    border-radius: 4px;
    box-shadow: 0 1px 3px #0001;
@@ -640,27 +674,46 @@ watch(serialNo, (nv, ov) => {
   margin: 0 auto;
 }
 .ncm-row-btn {
-  background: #e1f5fe;
+  background: #d0f0ff; /* stronger tint so buttons are visible */
   color: #01579b;
-  border: none;
+  padding: 0.32rem 0.55rem; /* compact button padding */
+  font-size: 0.95rem;
   border-radius: 4px;
-  padding: 0.5em 1em;
-  font-size: 0.9em;
-  cursor: pointer;
-  transition: background 0.2s;
-  margin-left: 0.5em;
+  margin-left: 0.35rem;
 }
 .ncm-row-btn:hover {
-  background: #b3e5fc;
+  background: #9fe1ff;
 }
 .ncm-sent-badge {
+  font-size: 0.8rem;
+  padding: 0.18rem 0.45rem;
   background: #e8f5e9;
   color: #2e7d32;
   border-radius: 4px;
-  padding: 0.2em 0.5em;
-  font-size: 0.85em;
   margin-left: 0.5em;
   align-self: center;
 }
-</style>
 
+/* Add collapsible styles for NCM panel */
+.ncm-collapse {
+  overflow: hidden;
+  transition: max-height 0.28s ease, opacity 0.2s ease, transform 0.18s ease;
+  max-height: 0; /* collapsed */
+  opacity: 0;
+}
+.ncm-collapse.open {
+  max-height: 1000px; /* large enough to contain content */
+  opacity: 1;
+}
+/* simple chevron rotation */
+.chevron {
+  display: inline-block;
+  transition: transform 0.18s ease;
+  transform: rotate(0deg);
+  font-size: 1.1em;
+  margin-left: 0.5rem;
+}
+.chevron.open {
+  transform: rotate(180deg);
+}
+</style>

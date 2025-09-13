@@ -1,11 +1,28 @@
 <template>
   <div class="planning-container">
-    <h2>Production Planning</h2>
-    <div class="search-section">
-      <input v-model="serialNo" @keydown.enter="searchProduct" placeholder="Enter SerialNo" class="search-input" />
-      <button @click="searchProduct" class="search-btn">Search</button>
+    <!-- Header: Left-aligned Back button when in Non-Product view; Right-aligned Add button in Production view -->
+    <div v-if="!showNonProduct" class="planning-header" style="display:flex; align-items:center; gap:1rem; justify-content:flex-end;">
+      <button class="add-nonproduct-btn switch-btn" @click="openNonProductPanel" aria-label="Open Non-Product Task panel">
+        <span class="switch-label">Add Non-Product Task</span>
+        <span class="forward-arrow" aria-hidden="true">→</span>
+      </button>
     </div>
-    <div v-if="product&&!showNonProduct" class="product-info">
+    <div v-else class="planning-header" style="display:flex; align-items:center; gap:1rem; justify-content:flex-start;">
+      <button class="back-btn switch-btn" @click="closeNonProductPanel" aria-label="Back to Products">
+        <span class="back-arrow" aria-hidden="true">←</span>
+        <span class="switch-label">Back to Products</span>
+      </button>
+    </div>
+
+    <!-- Production Planning content (visible only when not in Non-Product workflow) -->
+    <div v-if="!showNonProduct">
+      <h2 style="margin-top:0;">Production Planning</h2>
+      <div class="search-section">
+        <input v-model="serialNo" @keydown.enter="searchProduct" placeholder="Enter SerialNo" class="search-input" />
+        <button @click="searchProduct" class="search-btn">Search</button>
+      </div>
+    </div>
+    <div v-if="product && !showNonProduct" class="product-info">
       <h3>Product Info</h3>
       <div class="product-grid">
         <div><strong>SerialNo:</strong> {{ product.serialNo }}</div>
@@ -88,10 +105,6 @@
     <div class="all-products-section modern-table" v-if="!showNonProduct">
       <div class="all-products-header">
         <h3>All Systems Production State</h3>
-        <button class="add-nonproduct-btn switch-btn" @click="openNonProductPanel" aria-label="Open Non-Product Task panel">
-          <span class="switch-label">Add Non-Product Task</span>
-          <span class="forward-arrow" aria-hidden="true">→</span>
-        </button>
       </div>
       <div v-if="allLoading" class="loading">Loading...</div>
       <div v-else>
@@ -113,13 +126,9 @@
       </div>
     </div>
 
-    <!-- Non-Product Task Panel -->
+    <!-- Non-Product Task Panel (full-page) -->
     <div class="non-product-panel" v-if="showNonProduct">
       <div class="non-product-header">
-        <button class="back-btn switch-btn" @click="closeNonProductPanel" aria-label="Back to Products">
-          <span class="back-arrow" aria-hidden="true">←</span>
-          <span class="switch-label">Back to Products</span>
-        </button>
         <h3>Non-Product Task</h3>
       </div>
       <div class="assign-grid non-product-grid">
@@ -817,11 +826,8 @@ async function assignNonProductTask() {
 .assign-btn:hover { background: linear-gradient(90deg, #D45500 0%, #EC6602 100%); transform: translateY(-1px); }
 
 .all-products-section { margin-top: 3vw; background: #fff; border-radius: 14px; box-shadow: 0 3px 14px rgba(236,102,2,0.12); padding: 1.5vw 1vw 2vw 1vw; border: 1px solid #f2c7a6; }
-.all-products-header { position: relative; display:flex; align-items:center; }
-.all-products-header h3 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; }
-.all-products-header .add-nonproduct-btn { margin-left: auto }
-.add-nonproduct-btn { background:#f3f4f6; border:1px solid #ddd; padding:6px 10px; border-radius:6px; cursor:pointer }
-.add-nonproduct-btn .arrow{ margin-left:8px }
+.all-products-header { display:flex; align-items:center; justify-content:center; padding: 0.6rem 0 0.6rem 0; }
+.all-products-header h3 { margin: 0; font-size: 1.05rem; line-height: 1.4; text-align: center; }
 /* Prominent switch button shared style */
 .switch-btn { display: inline-flex; align-items: center; gap: 0.6rem; background: linear-gradient(90deg,#FFF4EA 0%,#FFF8F2 100%); border: 1px solid #F5D3B0; padding: 0.5rem 0.8rem; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(236,102,2,0.08); }
 .switch-btn:hover { transform: translateY(-2px); }
@@ -829,9 +835,9 @@ async function assignNonProductTask() {
 .forward-arrow, .back-arrow { display:inline-flex; align-items:center; justify-content:center; background: #FFF3E8; color: #EC6602; font-weight: 800; border-radius: 999px; padding: 0.25rem 0.5rem; font-size: 1.1rem; box-shadow: 0 2px 6px rgba(236,102,2,0.12); }
 .back-btn { background:transparent; border:none; font-size:18px; cursor:pointer; padding: 0; }
 .back-btn.switch-btn { padding: 0.2rem 0.5rem; }
-.non-product-panel { background: #fff; border: 1px solid #eee; padding: 16px; border-radius: 8px; margin-top: 12px }
-.non-product-header { position: relative; display:flex; align-items:center; gap:8px; }
-.non-product-header h3 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; }
+.non-product-panel { background: #fff; border: 1px solid #eee; padding: 1.25rem; border-radius: 8px; margin-top: 1rem; }
+.non-product-header { display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom: 0.75rem; }
+.non-product-header h3 { margin: 0; font-size: 1.05rem; line-height: 1.3; }
 .modern-vxe-table { border-radius: 12px; overflow: hidden; font-size: 1.05em; background: #fff; }
 .vxe-table--border .vxe-header--row th { background: #FFE6D3; color: #A64E00; font-weight: 700; }
 .vxe-table--border .vxe-body--row { background: #fff; }
@@ -844,4 +850,24 @@ async function assignNonProductTask() {
 .serial-link { cursor: pointer; color: #EC6602; font-weight: 700; text-decoration: underline; }
 .system-group { margin-bottom: 1.25rem }
 .group-title { padding: 0.6rem 0.8rem; background: #FFF4E6; color: #8a4b1a; font-weight: 700; border-radius: 8px; margin-bottom: 0.5rem }
+
+/* New styles for tab-like header buttons */
+.tab-group { margin-bottom: 2vw; }
+.tab-btn {
+  padding: 0.7vw 1.2vw;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #FFF4EA;
+  color: #6b3b1f;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  box-shadow: 0 4px 10px rgba(236,102,2,0.08);
+}
+.tab-btn:hover { background: #FFE6D3; transform: translateY(-1px); }
+.tab-btn.active {
+  background: linear-gradient(90deg,#FFF4EA 0%,#FFF8F2 100%);
+  border-color: #F5D3B0;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1), 0 4px 10px rgba(236,102,2,0.12);
+}
 </style>
