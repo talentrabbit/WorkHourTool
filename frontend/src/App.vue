@@ -16,6 +16,7 @@
       <aside  class="portal-nav">
         <nav>
           <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Production Planning</router-link>
+          <router-link v-if="isAdmin" to="/product-register" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Register Product</router-link>
           <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
           <router-link v-if="isProcess || isAdmin" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
           <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">WorkHour Maintenance</router-link>
