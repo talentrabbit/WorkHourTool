@@ -7,6 +7,7 @@ import WorkHourTool from './components/WorkHourTool.vue'
 import Planning from './components/Planning.vue'
 import WorkHourMaintenance from './components/WorkHourMaintenance.vue'
 import Ncm from './components/Ncm.vue'
+import ProductRegister from './components/ProductRegister.vue'
 import VXETable from 'vxe-table'
 import 'vxe-table/lib/style.css'
 import axios from 'axios';
@@ -16,6 +17,7 @@ const routes = [
   { path: '/main', component: Main },
   { path: '/worker', component: WorkHourTool },
   { path: '/planning', component: Planning },
+  { path: '/product-register', component: ProductRegister },
   { path: '/maintenance', component: WorkHourMaintenance }
   , { path: '/ncm', component: Ncm }
 ]

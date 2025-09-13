@@ -208,6 +208,36 @@ namespace backend.Controllers
             return Ok(products);
         }
 
+        // POST: api/WorkHours/add-product
+        [HttpPost("add-product")]
+        public IActionResult AddProduct([FromBody] AddProductDto dto)
+        {
+            if (dto == null) return BadRequest(new { message = "Request body required" });
+            if (string.IsNullOrWhiteSpace(dto.SerialNo)) return BadRequest(new { message = "SerialNo is required" });
+
+            using var db = new AppDbContext();
+            var sn = dto.SerialNo.Trim();
+            // check uniqueness
+            if (db.Products.Any(p => p.SerialNo == sn))
+            {
+                return Conflict(new { message = $"SerialNo '{sn}' already exists" });
+            }
+
+            var p = new Product
+            {
+                SerialNo = sn,
+                ModalityType = dto.ModalityType,
+                ProductLine = dto.ProductLine,
+                SystemType = dto.SystemType,
+                IvkNo = dto.IvkNo,
+                ProjectNo = dto.ProjectNo
+            };
+            db.Products.Add(p);
+            db.SaveChanges();
+
+            return Ok(new { message = "Product added", id = p.Id, serialNo = p.SerialNo });
+        }
+
         // GET: api/WorkHours/all-worker-names
         [HttpGet("all-worker-names")]
         public IActionResult GetAllWorkerNames()
@@ -789,6 +819,16 @@ namespace backend.Controllers
             public string? NcmAction { get; set; }
 
             public double NcmHours { get; set; }
+        }
+
+        public class AddProductDto
+        {
+            public string SerialNo { get; set; }
+            public string? ModalityType { get; set; }
+            public string? ProductLine { get; set; }
+            public string? SystemType { get; set; }
+            public string? IvkNo { get; set; }
+            public string? ProjectNo { get; set; }
         }
     }
 }
