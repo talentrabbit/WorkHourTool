@@ -382,7 +382,7 @@ watch(serialNo, (nv, ov) => {
       <span class="reset-btn-spacer"></span>
       <button class="submit-btn" @click="submitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
       <span class="reset-btn-spacer"></span>
-      <button class="reset-btn" @click="resetClocks" title="Will reset all clocks!">⟳</button>
+      <button class="reset-btn" @click="resetClocks" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Will reset Work Hour Clock!">⟳</button>
     </div>
     <!-- NCM panel: header always visible; inputs and Send button collapse/expand -->
     <div class="ncm-panel">
@@ -620,6 +620,11 @@ watch(serialNo, (nv, ov) => {
  }
  .reset-btn:hover {
    background: #ffd43b;
+ }
+ /* Dim the reset button when the session has been submitted (match submit button behavior) */
+ .reset-btn.submitted-dim {
+   opacity: 0.6;
+   cursor: not-allowed;
  }
  /* NCM metadata input styles */
  .ncm-inputs {
