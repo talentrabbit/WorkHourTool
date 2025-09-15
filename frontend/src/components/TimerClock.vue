@@ -8,7 +8,7 @@ const isWorkSubmitted = inject('isWorkSubmitted', null)
 const username = inject('username', ref('Guest'))
 
 const props = defineProps({
-  serialNo: { type: String, default: 'SN-101009' },
+  serialNo: { type: String, default: '101000' },
   process: { type: String, default: 'Assembly' },
   workSeat: { type: String, default: 'WS-02' },
   initialWorkHourId: { type: [String, Number], default: null }
@@ -69,7 +69,7 @@ async function fetchAggregates() {
 
 const workTime = ref(0) // seconds
 const ncmTime = ref(0) // seconds
-const activeClock = ref('') // 'work' or 'ncm' or ''
+const activeClock = ref('paused') // changed from '' to 'paused' to have two explicit states: 'active' | 'paused'
 let timer = null
 const currentWorkHourId = ref(null)
 
@@ -168,22 +168,59 @@ if (props.initialWorkHourId) {
   currentWorkHourId.value = props.initialWorkHourId
 }
 
-// watch for parent updates
-watch(() => props.initialWorkHourId, (nv) => {
-  console.debug('TimerClock: initialWorkHourId prop changed ->', nv, 'old currentWorkHourId=', currentWorkHourId.value)
-  currentWorkHourId.value = nv || null
-})
+// helper: try to restore existing session for current WorkHourId
+async function tryRestoreSessionForWorkHour() {
+  if (!currentWorkHourId.value) return
+  try {
+    console.log('TimerClock: attempting to restore session for WorkHourId', currentWorkHourId.value)
+    const res = await axios.get(`/api/WorkHours/session-by-workhour/${currentWorkHourId.value}`)
+    const session = res.data
+    // API returns camelCase JSON (sessionId, elapsedSeconds, state)
+    if (session && session.sessionId) {
+      // populate session id and sync elapsed seconds
+      sessionId.value = session.sessionId
+      const serverElapsed = Number(session.elapsedSeconds ?? 0)
+      // normalize activeClock from server into client values 'active' or 'paused'
+      if (session.activeClock && (session.activeClock === 'Active' || session.activeClock === 'active')) {
+        activeClock.value = 'active'
+      } else {
+        activeClock.value = 'paused'
+      }
+
+      console.log('TimerClock: restored session', sessionId.value, 'with elapsed seconds', serverElapsed)
+      if ((Number(workTime.value) || 0) < serverElapsed) workTime.value = serverElapsed
+
+      // if server says session is Working and elapsed > 0 then start the local timer automatically
+      const state = (session.state || session.State || '').toString()
+      if ((state === 'Working' || state === 'working') && serverElapsed > 0 && activeClock.value === 'active') {
+        if (isCountingTimerActive) isCountingTimerActive.value = true
+        if (timer) clearInterval(timer)
+        timer = setInterval(() => { if (activeClock.value === 'active') workTime.value++ }, 1000)
+      }
+
+      // start heartbeat loop (always run heartbeat to keep server session in sync even when paused)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      heartbeatTimer = setInterval(() => sendHeartbeat(), HEARTBEAT_INTERVAL_MS)
+    }
+  } catch (err) {
+    // 404 is expected when no session exists; ignore
+    if (err && err.response && err.response.status === 404) return
+    console.error('Failed to restore session for WorkHourId', currentWorkHourId.value, err)
+  }
+}
 
 // Start overall timer on mount, clean up on unmount
 onMounted(() => {
     // Only fetch aggregates on mount; do not toggle global isCountingTimerActive here
     void fetchAggregates()
     void fetchProcessEngineers()
+    // try to restore any existing session for the provided WorkHourId
+    void tryRestoreSessionForWorkHour()
 })
 onBeforeUnmount(() => {
   // ensure we clear local timer and global flag if active
   if (timer) clearInterval(timer)
-  if (isCountingTimerActive && activeClock.value === '') isCountingTimerActive.value = false
+  if (isCountingTimerActive && activeClock.value === 'paused') isCountingTimerActive.value = false
 })
 
 
@@ -211,7 +248,7 @@ async function setWorkingBackend(workHourId) {
 }
 
 
-function startClock(type) {
+function startClock() {
   // Prevent starting new clocks if the current session has already been submitted
   if (submitted.value) {
     alert('Work hours already submitted for this session. Reset clocks to start again.')
@@ -219,27 +256,28 @@ function startClock(type) {
   }
 
   // If clicking the active clock, pause it
-  if (activeClock.value === type) {
+  if (activeClock.value === 'active'){
     if (timer) clearInterval(timer)
     timer = null
-    activeClock.value = ''
-    if (isCountingTimerActive) isCountingTimerActive.value = false
+    // Set paused state and notify server immediately via heartbeat
+    activeClock.value = 'paused'
+    // send heartbeat so server records ActiveClock='paused' and current elapsed
+    void sendHeartbeat()
     return
   }
   // Otherwise, start the selected clock
-  if (timer) clearInterval(timer)
-  activeClock.value = type
-  if (isCountingTimerActive) isCountingTimerActive.value = true
-  timer = setInterval(() => {
-    if (activeClock.value === 'work') workTime.value++
-  }, 1000)
+  if (activeClock.value === 'paused'){
+    if (timer) clearInterval(timer)
+    activeClock.value = 'active'
+    if (isCountingTimerActive) isCountingTimerActive.value = true
+    timer = setInterval(() => {
+      if (activeClock.value === 'active') workTime.value++
+    }, 1000)
+  }  
 
-  // If starting the work clock, ensure we have a WorkHour id but avoid extra lookup if parent provided it
-  if (type === 'work') {
-      // Update WorkHour to Working state
-      (async () => {
-        await setWorkingBackend(currentWorkHourId.value)
-      })()
+  // If starting the work clock, ensure we have a WorkHour id and mark WorkHour as Working
+  if (activeClock.value === 'active') {
+    void setWorkingBackend(currentWorkHourId.value)
   }
 }
 
@@ -277,7 +315,7 @@ async function submitWorkHours() {
     // stop timer locally
     if (timer) clearInterval(timer)
     timer = null
-    activeClock.value = ''
+    activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
 
     // keep timers and NCM metadata visible but mark as submitted and dim UI
@@ -314,12 +352,30 @@ async function resetClocks() {
         await axios.post('/api/WorkHours/reset', { WorkHourId: id })
         console.debug('TimerClock.resetClocks: reset request completed for WorkHourId=', id)
       }
+
+      // Ensure any heartbeat loop is stopped and any server-side session is removed
+      try {
+        // Prefer explicit delete-session endpoint to remove manager + DB record
+        if (sessionId.value) {
+          await axios.post('/api/WorkHours/delete-session', { SessionId: sessionId.value })
+        } else if (id) {
+          await axios.post('/api/WorkHours/delete-session', { WorkHourId: id })
+        }
+      } catch (delErr) {
+        // non-fatal; log for diagnostics
+        console.warn('TimerClock.resetClocks: delete-session failed', delErr)
+      }
+
+      // stop client-side heartbeat and clear session reference unconditionally
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+      sessionId.value = null
+
     } catch (err) {
       console.error('Failed to reset workhour', err)
     }
     workTime.value = 0
     ncmTime.value = 0
-    activeClock.value = ''
+    activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
     if (timer) clearInterval(timer)
     // clear submitted state so user can start again
@@ -336,13 +392,13 @@ async function resetClocks() {
 watch(serialNo, (nv) => {
   void fetchAggregates()
 })
-// also watch selected serial to clear timers when serial changes externally
+// also watch selected serial to clear timers when serial changes
 watch(serialNo, (nv, ov) => {
   if (nv && nv !== ov) {
     // stop any running timers when switching serials
     if (timer) clearInterval(timer)
     timer = null
-    activeClock.value = ''
+    activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
     currentWorkHourId.value = null
     // clear ncm inputs when serial changes
@@ -352,6 +408,146 @@ watch(serialNo, (nv, ov) => {
     // clear submitted state when switching systems
     submitted.value = false
   }
+})
+
+// watch for changes to the parent-provided initialWorkHourId so we can switch
+// to a different existing WorkHour and attempt to resume its session
+watch(() => props.initialWorkHourId, (nv, ov) => {
+  if (nv && nv !== ov) {
+    currentWorkHourId.value = nv
+    void tryRestoreSessionForWorkHour()
+  } else if (nv == null) {
+    // parent cleared the id — clear local state
+    currentWorkHourId.value = null
+  }
+})
+
+// New: when the user switches to the counting tab, try to restore any existing session
+// Ensure we handle the case where the injected ref may be null by providing a fallback ref
+const _countingActive = isCountingTimerActive || ref(false)
+watch(_countingActive, (nv, ov) => {
+  // only act on activation (false -> true)
+  if (!nv) return
+  // require a selected WorkHourId to query for session
+  if (!currentWorkHourId.value) return
+  try {
+    void tryRestoreSessionForWorkHour()
+  } catch (e) {
+    console.error('Error while restoring session on tab switch', e)
+  }
+})
+
+const sessionId = ref(null)
+let heartbeatTimer = null
+const HEARTBEAT_INTERVAL_MS = 15000 // 15s
+
+async function startSessionIfNeeded() {
+  if (sessionId.value) return
+  try {
+    const res = await axios.post('/api/WorkHours/start-session', {
+      WorkHourId: currentWorkHourId.value,
+      WorkerName: (username && username.value) ? username.value : 'Guest',
+      SerialNo: serialNo.value,
+      ProcessName: process.value,
+      ElapsedSeconds: workTime.value,
+      ActiveClock: activeClock.value === 'active' ? 'active' : 'paused', // send 'paused' to DB when not active
+      MetadataJson: JSON.stringify({ note: 'started from client' }),
+      State: 'Working'
+    })
+    sessionId.value = res.data?.sessionId || null
+
+    // If server returns a persisted elapsedSeconds (resuming an existing session), use it.
+    const serverElapsed = res.data?.elapsedSeconds
+    if (typeof serverElapsed === 'number') {
+      // Avoid clobbering a larger client-side counter (e.g. if client already advanced)
+      if ((Number(workTime.value) || 0) < serverElapsed) {
+        workTime.value = serverElapsed
+      }
+    }
+
+    // start periodic heartbeat
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    heartbeatTimer = setInterval(() => sendHeartbeat(), HEARTBEAT_INTERVAL_MS)
+  } catch (err) {
+    console.error('Failed to start session', err)
+  }
+}
+
+// Replace sendHeartbeat to read server's response and sync elapsedSeconds/sessionId
+async function sendHeartbeat() {
+  if (!sessionId.value) return
+  try {
+    const res = await axios.post('/api/WorkHours/session-heartbeat', {
+      SessionId: sessionId.value,
+      ElapsedSeconds: workTime.value,
+      ActiveClock: activeClock.value === 'active' ? 'active' : 'paused', // send 'paused' to DB when not active
+      MetadataJson: JSON.stringify({ ncmCount: ncmRows.value.length }),
+      State: submitted.value ? 'Completed' : 'Working'
+    })
+
+    // If server responded with updated elapsedSeconds, use it (but only if it's larger)
+    const serverElapsed = res?.data?.elapsedSeconds
+    if (typeof serverElapsed === 'number') {
+      if ((Number(workTime.value) || 0) < serverElapsed) {
+        workTime.value = serverElapsed
+      }
+    }
+
+    // Server may also return a canonical sessionId (e.g., if manager created or rotated it)
+    const returnedSessionId = res?.data?.sessionId
+    if (returnedSessionId && returnedSessionId !== sessionId.value) {
+      sessionId.value = returnedSessionId
+    }
+  } catch (err) {
+    console.error('Heartbeat failed', err)
+  }
+}
+
+async function stopSession() {
+  if (!sessionId.value) return
+  try {
+    await axios.post('/api/WorkHours/complete-session', { SessionId: sessionId.value, ElapsedSeconds: workTime.value })
+  } catch (err) {
+    console.error('Failed to complete session', err)
+  } finally {
+    sessionId.value = null
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+  }
+}
+
+// Hook into startClock and submit/reset to manage session lifecycle
+const originalStartClock = startClock
+startClock = function() {
+  originalStartClock()
+  // when starting work clock, ensure server session exists
+  if (activeClock.value === 'active') {
+    void startSessionIfNeeded()
+  }
+}
+
+// after submitWorkHours completes we mark session completed
+const originalSubmit = submitWorkHours
+submitWorkHours = async function() {
+  await originalSubmit()
+  // send final heartbeat and stop session tracking
+  try {
+    await sendHeartbeat()
+  } catch {}
+  await stopSession()
+}
+
+// reset also stops session
+const originalReset = resetClocks
+resetClocks = async function() {
+  // originalReset already handles delete-session and clears heartbeatTimer/sessionId
+  await originalReset()
+}
+
+// ensure heartbeats stop on unmount
+onBeforeUnmount(() => {
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
+  // logoff doesn't submit current work.
+  //if (sessionId.value) { void stopSession() }
 })
 </script>
 
@@ -373,8 +569,8 @@ watch(serialNo, (nv, ov) => {
     <div class="workhour-clocks-row">
       <div class="clock-block">
         <div class="clock-label">Effective Working Time</div>
-        <div class="clock-time" :class="{active: activeClock === 'work', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
-        <button class="circle-wide-btn" :class="{active: activeClock === 'work', dimmed: isCountingTimerActive && activeClock !== 'work'}" :disabled="submitted" @click="startClock('work')" title="Work">Work</button>
+        <div class="clock-time" :class="{active: activeClock === 'active', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
+        <button class="circle-wide-btn" :class="{active: activeClock === 'active', dimmed: activeClock !== 'paused'}" :disabled="submitted" @click="startClock()" title="Work">Work</button>
       </div>
       
     </div>
@@ -545,7 +741,7 @@ watch(serialNo, (nv, ov) => {
   transform: translateY(1px) scale(0.98);
 }
 
-.circle-wide-btn:disabled, .circle-wide-btn.dimmed {
+.circle-wide-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

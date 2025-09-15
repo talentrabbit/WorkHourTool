@@ -9,6 +9,7 @@ namespace backend.Data
         public DbSet<WorkHour> WorkHours { get; set; }
         public DbSet<NcmTime> NcmTimes { get; set; }
         public DbSet<User> Users { get; set; }
+        public DbSet<WorkSession> WorkSessions { get; set; }
         public static string DbProvider { get; set; } = "sqlite";
         public static string ConnectionString { get; set; } = "Data Source=workhour.db";
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -48,6 +49,17 @@ namespace backend.Data
             {
                 eb.Property(n => n.State).HasMaxLength(50).HasDefaultValue("NotStarted");
                 eb.Property(n => n.NcmAction).HasMaxLength(500);
+            });
+
+            // WorkSession snapshots for client-server session management
+            modelBuilder.Entity<WorkSession>(eb =>
+            {
+                eb.ToTable("WorkSession");
+                eb.HasKey(ws => ws.Id);
+                eb.Property(ws => ws.SessionId).HasMaxLength(100).IsRequired();
+                eb.HasIndex(ws => ws.SessionId).IsUnique();
+                eb.Property(ws => ws.State).HasMaxLength(50).HasDefaultValue("NotStarted");
+                eb.Property(ws => ws.MetadataJson).HasColumnType("TEXT");
             });
 
             // Users table configuration
