@@ -118,9 +118,9 @@
             </vxe-column>
             <vxe-column field="projectNo" title="ProjectNo" width="120" />
             <vxe-column field="systemType" title="SystemType" width="120" />
-            <vxe-column field="productionState" title="Production State" width="150" />
-            <vxe-column field="workHourOverall" title="WorkHour Overall" width="150" />
-            <vxe-column field="ncmTimeOverall" title="NCM Time Overall" width="150" />
+            <vxe-column field="productionState" title="State" width="150" />
+            <vxe-column field="workHourOverall" title="WorkHour" width="150" />
+            <vxe-column field="ncmTimeOverall" title="NCMTime" width="150" />
           </vxe-table>
         </div>
       </div>

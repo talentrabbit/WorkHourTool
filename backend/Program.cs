@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure Serilog to write logs to a file with timestamps
-var logsPath = Path.Combine(AppContext.BaseDirectory, "Logs");
+var logsPath = Path.Combine(AppContext.BaseDirectory, "logs");
 Directory.CreateDirectory(logsPath);
 
 // If Serilog is available, configure it; otherwise fall back to default logging
@@ -43,8 +43,21 @@ builder.Services.AddControllers().AddJsonOptions(opts =>
 });
 
 // Windows Authentication (Negotiate)
-builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
-    .AddNegotiate();
+// Allow tests to disable Negotiate by setting TEST_DISABLE_NEGOTIATE=1 in the process environment.
+var disableNegotiateEnv = Environment.GetEnvironmentVariable("TEST_DISABLE_NEGOTIATE");
+var disableNegotiate = string.Equals(disableNegotiateEnv, "1", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(disableNegotiateEnv, "true", StringComparison.OrdinalIgnoreCase);
+
+if (!disableNegotiate)
+{
+    builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+        .AddNegotiate();
+}
+else
+{
+    // In test mode, the test host will register its own Authentication scheme (e.g. 'Test').
+    builder.Services.AddAuthentication();
+}
 
 builder.Services.AddAuthorization();
 
@@ -59,6 +72,11 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod()
             .AllowCredentials());
 });
+
+// Register WorkSessionManager singleton so it can manage in-memory sessions across the app
+builder.Services.AddSingleton<backend.Services.WorkSessionManager>();
+
+builder.Services.AddHostedService<backend.Services.WorkSessionCleanupService>();
 
 var app = builder.Build();
 
@@ -350,3 +368,6 @@ public class RoleConfig
     public List<string> ProcessEngineers { get; set; } = new List<string>();
     public List<string> Workers { get; set; } = new List<string>();
 }
+
+// Expose Program type for WebApplicationFactory in tests
+public partial class Program { }

@@ -7,6 +7,7 @@ using backend.Data;
 using System.IO;
 using System.Text.Json;
 using System.Linq; // added
+using backend.Services;
 
 namespace backend.Controllers
 {
@@ -18,6 +19,7 @@ namespace backend.Controllers
         private static string[] _workerNames = new string[0];
         private static string[] _processNames = new string[0];
         private static string[] _processEngineerNames = new string[0];
+        private readonly WorkSessionManager _sessionManager;
 
         static WorkHoursController()
         {
@@ -36,9 +38,10 @@ namespace backend.Controllers
             catch { /* Optionally log or handle error */ }
         }
 
-        public WorkHoursController(ILogger<WorkHoursController> logger)
+        public WorkHoursController(ILogger<WorkHoursController> logger, WorkSessionManager sessionManager)
         {
             _logger = logger;
+            _sessionManager = sessionManager;
         }
 
         // POST: api/WorkHours
@@ -573,20 +576,58 @@ namespace backend.Controllers
             using var db = new AppDbContext();
             var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
             if (wh == null) return NotFound(new { message = "WorkHour not found" });
-
-            // Only allow reset when WorkHour is in Working or NotStarted. Reject when already Completed or other terminal states.
             if (wh.State != "Working" && wh.State != "NotStarted")
             {
-                return BadRequest(new { message = $"Cannot reset WorkHour in state '{wh.State}'" });
+                return BadRequest(new { message = "Cannot reset WorkHour in state: " + wh.State });
             }
 
-            // Reset actual timestamps and state so UI can start timers again
+            // Reset the WorkHour to NotStarted and clear actual times
             wh.State = "NotStarted";
             wh.StartTimeActual = null;
             wh.EndTimeActual = null;
             db.SaveChanges();
 
-            return Ok(new { message = "WorkHour reset", id = wh.Id });
+            _logger.LogInformation("ResetWorkHour: WorkHour {WorkHourId} set to NotStarted", wh.Id);
+
+            return Ok(new { message = "WorkHour reset" });
+        }
+
+        // POST: api/WorkHours/delete-session
+        [HttpPost("delete-session")]
+        public IActionResult DeleteSession([FromBody] DeleteSessionRequest req)
+        {
+            if (req == null) return BadRequest(new { message = "Request body required" });
+            try
+            {
+                bool removed = false;
+                if (!string.IsNullOrWhiteSpace(req.SessionId))
+                {
+                    removed = _sessionManager?.RemoveSession(req.SessionId) ?? false;
+                }
+                else if (req.WorkHourId.HasValue)
+                {
+                    removed = _sessionManager?.RemoveByWorkHourId(req.WorkHourId.Value) ?? false;
+                }
+                else
+                {
+                    return BadRequest(new { message = "SessionId or WorkHourId is required" });
+                }
+
+                if (removed)
+                {
+                    _logger.LogInformation("DeleteSession: removed session (SessionId={SessionId}, WorkHourId={WorkHourId})", req.SessionId, req.WorkHourId);
+                    return Ok(new { message = "Session removed", removed = true });
+                }
+                else
+                {
+                    return NotFound(new { message = "No matching session found", removed = false });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "DeleteSession: failed to remove session (SessionId={SessionId}, WorkHourId={WorkHourId})", req?.SessionId, req?.WorkHourId);
+                return StatusCode(500, new { message = "Failed to remove session" });
+            }
         }
 
         // POST: api/WorkHours/complete
@@ -731,6 +772,297 @@ namespace backend.Controllers
             return Ok(new { id = wh.Id });
         }
 
+        // POST: api/WorkHours/start-session
+        [HttpPost("start-session")]
+        public IActionResult StartSession([FromBody] StartSessionRequest req)
+        {
+            if (req == null) return BadRequest(new { message = "Request body required" });
+
+            // Prefer the in-memory manager when available to provide live timers
+            try
+            {
+                if (_sessionManager != null)
+                {
+                    var info = _sessionManager.StartOrResume(new WorkSessionManager.ManagerStartRequest
+                    {
+                        SessionId = null,
+                        WorkHourId = req.WorkHourId,
+                        WorkerName = req.WorkerName,
+                        SerialNo = req.SerialNo,
+                        ProcessName = req.ProcessName,
+                        ElapsedSeconds = req.ElapsedSeconds,
+                        ActiveClock = req.ActiveClock,
+                        MetadataJson = req.MetadataJson,
+                        State = req.State
+                    });
+                    return Ok(new { sessionId = info.SessionId, elapsedSeconds = info.ElapsedSeconds, state = info.State });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "WorkSessionManager failed to StartOrResume, falling back to DB persistence");
+            }
+
+            // Fallback: existing DB-backed behavior
+            using var db = new AppDbContext();
+            // If caller supplied a WorkHourId, try to find an open session for that WorkHour and continue it
+            if (req.WorkHourId.HasValue)
+            {
+                var existing = db.WorkSessions
+                    .Where(s => s.WorkHourId == req.WorkHourId.Value)
+                    .OrderByDescending(s => s.LastHeartbeat)
+                    .FirstOrDefault(s => s.State != "Completed" && s.State != "Expired");
+
+                if (existing != null)
+                {
+                    existing.LastHeartbeat = DateTime.Now;
+                    if (req.ElapsedSeconds.HasValue && req.ElapsedSeconds.Value > existing.ElapsedSeconds)
+                    {
+                        existing.ElapsedSeconds = req.ElapsedSeconds.Value;
+                    }
+                    existing.ActiveClock = req.ActiveClock ?? existing.ActiveClock;
+                    existing.MetadataJson = req.MetadataJson ?? existing.MetadataJson;
+                    existing.State = string.IsNullOrWhiteSpace(req.State) ? existing.State : req.State;
+                    db.SaveChanges();
+
+                    return Ok(new { sessionId = existing.SessionId, elapsedSeconds = existing.ElapsedSeconds });
+                }
+            }
+
+            var session = new WorkSession
+            {
+                SessionId = Guid.NewGuid().ToString(),
+                WorkHourId = req.WorkHourId,
+                WorkerName = req.WorkerName,
+                SerialNo = req.SerialNo,
+                ProcessName = req.ProcessName,
+                StartTimeActual = DateTime.Now,
+                LastHeartbeat = DateTime.Now,
+                ElapsedSeconds = req.ElapsedSeconds ?? 0,
+                ActiveClock = req.ActiveClock,
+                MetadataJson = req.MetadataJson,
+                State = string.IsNullOrWhiteSpace(req.State) ? "Working" : req.State
+            };
+            db.WorkSessions.Add(session);
+            db.SaveChanges();
+            return Ok(new { sessionId = session.SessionId, elapsedSeconds = session.ElapsedSeconds });
+        }
+
+        // POST: api/WorkHours/session-heartbeat
+        [HttpPost("session-heartbeat")]
+        public IActionResult SessionHeartbeat([FromBody] SessionHeartbeatRequest req)
+        {
+            if (req == null || string.IsNullOrWhiteSpace(req.SessionId)) return BadRequest(new { message = "SessionId is required" });
+
+            try
+            {
+                if (_sessionManager != null)
+                {
+                    var info = _sessionManager.Heartbeat(new WorkSessionManager.ManagerHeartbeatRequest
+                    {
+                        SessionId = req.SessionId,
+                        ElapsedSeconds = req.ElapsedSeconds,
+                        ActiveClock = req.ActiveClock,
+                        MetadataJson = req.MetadataJson,
+                        State = req.State
+                    });
+
+                    if (info != null)
+                    {
+                        _logger.LogInformation("Heartbeat processed in WorkSessionManager for SessionId: {SessionId}, ElapsedSeconds: {ElapsedSeconds}, State: {State}", req.SessionId, info.ElapsedSeconds, info.State);
+                        return Ok(new { message = "heartbeat recorded", elapsedSeconds = info.ElapsedSeconds, state = info.State });
+                    }    
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "WorkSessionManager failed to process heartbeat, falling back to DB persistence");
+            }
+
+            using var db = new AppDbContext();
+            var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
+            if (session == null) return NotFound(new { message = "Session not found" });
+            session.LastHeartbeat = DateTime.Now;
+            session.ElapsedSeconds = req.ElapsedSeconds ?? session.ElapsedSeconds;
+            session.ActiveClock = req.ActiveClock ?? session.ActiveClock;
+            session.MetadataJson = req.MetadataJson ?? session.MetadataJson;
+            session.State = req.State ?? session.State;
+            db.SaveChanges();
+            return Ok(new { message = "heartbeat recorded" });
+        }
+
+        // POST: api/WorkHours/pause-session
+        [HttpPost("pause-session")]
+        public IActionResult PauseSession([FromBody] PauseSessionRequest req)
+        {
+            if (req == null || string.IsNullOrWhiteSpace(req.SessionId)) return BadRequest(new { message = "SessionId required" });
+            try
+            {
+                if (_sessionManager != null && _sessionManager.PauseSession(req.SessionId))
+                {
+                    return Ok(new { message = "paused" });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to pause session via WorkSessionManager");
+            }
+
+            // fallback: update DB directly
+            using var db = new AppDbContext();
+            var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
+            if (session == null) return NotFound(new { message = "Session not found" });
+            session.State = "Paused";
+            session.LastHeartbeat = DateTime.Now;
+            db.SaveChanges();
+            return Ok(new { message = "paused" });
+        }
+
+        // POST: api/WorkHours/complete-session
+        [HttpPost("complete-session")]
+        public IActionResult CompleteSession([FromBody] CompleteSessionRequest req)
+        {
+            if (req == null || string.IsNullOrWhiteSpace(req.SessionId)) return BadRequest(new { message = "SessionId is required" });
+
+            try
+            {
+                if (_sessionManager != null && _sessionManager.CompleteSession(req.SessionId, req.ElapsedSeconds))
+                {
+                    return Ok(new { message = "session completed" });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "WorkSessionManager failed to complete session, falling back to DB persistence");
+            }
+
+            using var db = new AppDbContext();
+            var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
+            if (session == null) return NotFound(new { message = "Session not found" });
+
+            session.ElapsedSeconds = req.ElapsedSeconds ?? session.ElapsedSeconds;
+            session.LastHeartbeat = DateTime.Now;
+            session.State = "Completed";
+
+            // Persist to WorkHour if referenced
+            if (session.WorkHourId.HasValue)
+            {
+                var wh = db.WorkHours.FirstOrDefault(w => w.Id == session.WorkHourId.Value);
+                if (wh != null)
+                {
+                    wh.EffectiveHours = Math.Round((session.ElapsedSeconds / 3600.0) * 100) / 100;
+                    wh.EndTimeActual = DateTime.Now;
+                    wh.State = "Completed";
+                    if (!string.IsNullOrWhiteSpace(session.WorkerName)) wh.WorkerName = session.WorkerName;
+                }
+            }
+
+            // Optionally persist NCM rows if metadata contains an array named 'ncmRows'
+            if (!string.IsNullOrWhiteSpace(session.MetadataJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(session.MetadataJson);
+                    if (doc.RootElement.TryGetProperty("ncmRows", out var ncmRows) && ncmRows.ValueKind == JsonValueKind.Array)
+                    {
+                        int productId = 0;
+                        if (session.WorkHourId.HasValue)
+                        {
+                            productId = db.WorkHours.Where(w => w.Id == session.WorkHourId.Value).Select(w => w.ProductId).FirstOrDefault();
+                        }
+
+                        foreach (var el in ncmRows.EnumerateArray())
+                        {
+                            var pe = el.TryGetProperty("processEngineer", out var peEl) && peEl.ValueKind == JsonValueKind.String ? peEl.GetString() : null;
+                            var na = el.TryGetProperty("ncmAction", out var naEl) && naEl.ValueKind == JsonValueKind.String ? naEl.GetString() : null;
+                            double nh = 0;
+                            if (el.TryGetProperty("ncmHours", out var nhEl) && nhEl.ValueKind == JsonValueKind.Number) nh = nhEl.GetDouble();
+
+                            var ncm = new NcmTime
+                            {
+                                ProcessEngineer = pe,
+                                ProcessName = session.ProcessName,
+                                StartTime = DateTime.Now,
+                                EndTime = DateTime.Now,
+                                NcmHours = nh,
+                                ProductId = productId,
+                                State = "Notified",
+                                NcmAction = na
+                            };
+                            db.NcmTimes.Add(ncm);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to parse MetadataJson for session {SessionId}", session.SessionId);
+                }
+            }
+
+            db.SaveChanges();
+            return Ok(new { message = "session completed" });
+        }
+
+        // GET: api/WorkHours/session-by-workhour/{workHourId}
+        [HttpGet("session-by-workhour/{workHourId:int}")]
+        public IActionResult GetSessionByWorkHour(int workHourId)
+        {
+            if (workHourId <= 0) return BadRequest(new { message = "WorkHourId is required" });
+            try
+            {
+                if (_sessionManager == null)
+                {
+                    _logger?.LogError("WorkSessionManager not available, cannot fetch live session for WorkHourId {WorkHourId}", workHourId);
+                    return NotFound();
+                }
+                var session = _sessionManager.GetByWorkHourId(workHourId);
+                _logger?.LogInformation("Fetched session for WorkHourId {WorkHourId}: {Session}", workHourId, session == null ? "null" : session.SessionId);
+                if (session == null)
+                {
+                    _logger?.LogInformation("No active session found for WorkHourId {WorkHourId}", workHourId);
+                    return NotFound();
+                }
+
+                // Log important session information so callers and diagnostics can observe live state
+                try
+                {
+                    if ((session.ElapsedSeconds > 0) || string.Equals(session.State, "Working", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(session.MetadataJson))
+                    {
+                        _logger?.LogInformation("Active session for WorkHourId {WorkHourId}: SessionId={SessionId}, ElapsedSeconds={ElapsedSeconds}, State={State}, ActiveClock={ActiveClock}, LastHeartbeat={LastHeartbeat}, HasMetadata={HasMetadata}",
+                            workHourId,
+                            session.SessionId,
+                            session.ElapsedSeconds,
+                            session.State,
+                            session.ActiveClock,
+                            session.LastHeartbeat,
+                            !string.IsNullOrWhiteSpace(session.MetadataJson));
+                    }
+                }
+                catch (Exception logEx)
+                {
+                    _logger?.LogDebug(logEx, "Failed to log session details for WorkHourId {WorkHourId}", workHourId);
+                }
+
+
+                return Ok(new
+                    {
+                        SessionId = session.SessionId,
+                        WorkHourId = session.WorkHourId,
+                        WorkerName = session.WorkerName,
+                        ElapsedSeconds = session.ElapsedSeconds,
+                        ActiveClock = session.ActiveClock,
+                        State = session.State,
+                        MetadataJson = session.MetadataJson,
+                        LastHeartbeat = session.LastHeartbeat
+                    });
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error while fetching session for WorkHourId {WorkHourId}", workHourId);
+                return Problem(ex.Message);
+            }
+        }
+
         private class MIProdCommInfo
         {
             public string[]? WorkerNames { get; set; }
@@ -809,6 +1141,12 @@ namespace backend.Controllers
             public int WorkHourId { get; set; }
         }
 
+        public class DeleteSessionRequest
+        {
+            public string? SessionId { get; set; }
+            public int? WorkHourId { get; set; }
+        }
+
         public class NcmSaveDto
         {
             public string? SerialNo { get; set; }
@@ -829,6 +1167,38 @@ namespace backend.Controllers
             public string? SystemType { get; set; }
             public string? IvkNo { get; set; }
             public string? ProjectNo { get; set; }
+        }
+
+        public class StartSessionRequest
+        {
+            public int? WorkHourId { get; set; }
+            public string? WorkerName { get; set; }
+            public string? SerialNo { get; set; }
+            public string? ProcessName { get; set; }
+            public int? ElapsedSeconds { get; set; }
+            public string? ActiveClock { get; set; }
+            public string? MetadataJson { get; set; }
+            public string? State { get; set; }
+        }
+
+        public class SessionHeartbeatRequest
+        {
+            public string? SessionId { get; set; }
+            public int? ElapsedSeconds { get; set; }
+            public string? ActiveClock { get; set; }
+            public string? MetadataJson { get; set; }
+            public string? State { get; set; }
+        }
+
+        public class CompleteSessionRequest
+        {
+            public string? SessionId { get; set; }
+            public int? ElapsedSeconds { get; set; }
+        }
+
+        public class PauseSessionRequest
+        {
+            public string? SessionId { get; set; }
         }
     }
 }

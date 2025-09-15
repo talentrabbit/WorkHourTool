@@ -37,6 +37,7 @@ backend/Migrations/*.cs
 *.db-wal
 ImportProductsFromCsv/Products.csv
 backend/workhour.db
-backend.Tests/UnitTest1.cs
 *.jpg
 *.csv
+backend/*- Copy.db
+backend/testrequest.ps1
