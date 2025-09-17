@@ -174,9 +174,9 @@ onMounted(async () => {
 /* Root: fixed to viewport 16:9, scalable */
 .portal {
   width: 100vw;
-  max-width: 1920px; /* constrain to target desktop width */
+  max-width: 1366px; /* constrain to target desktop width */
   height: 100vh;
-  margin: 0 auto; /* center on wide displays */
+  margin: 0; /* align to left of screen */
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);
@@ -198,7 +198,7 @@ onMounted(async () => {
 
 /* Body */
 .portal-body { flex: 1; display: flex; min-height: 0; width: 100%; position: relative; }
-.portal-nav { width: 260px; min-width: 220px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 16px 10px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
+.portal-nav { width: 220px; min-width: 220px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 16px 10px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
 .portal-nav nav { display: flex; flex-direction: column; gap: 8px; }
 .nav-link { display: block; padding: 10px 12px; color: #82451F; text-decoration: none; border-radius: 8px; background: #FFE6D3; box-shadow: 0 1px 4px rgba(236,102,2,0.08); font-weight: 600; }
 .nav-link:hover { transform: translateY(-1px); background: #FFD9BB; }

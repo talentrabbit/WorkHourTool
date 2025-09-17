@@ -98,32 +98,32 @@ async function checkTodayAssignments(){
   }
 }
 
+// Notice, this function return 1st record of matching serial/process. If multiple assignments exist for same serial/process, it may not be the intended one.
 async function resolveWorkHourId(serial, processName) {
   selectedWorkHourId.value = null
   if (!serial) return
   try {
     const worker = matchedWorkerName.value || username.value || 'Guest'
-    // Prefer using the assignment's start date if present
-    // Helper: format a Date (or date-string) as local YYYY-MM-DD (use wall-clock local date)
-    const formatLocalYMD = (dInput) => {
+
+    // Helper: format a Date (or date-string) as local YYYY-MM-DD HH:mm:ss to match DB format
+    const formatLocalDateTime = (dInput) => {
       const d = (dInput instanceof Date) ? dInput : new Date(dInput)
       if (isNaN(d.getTime())) return ''
-      const y = d.getFullYear()
-      const m = String(d.getMonth() + 1).padStart(2, '0')
-      const day = String(d.getDate()).padStart(2, '0')
-      return `${y}-${m}-${day}`
+      const pad = n => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
     }
 
-    // Default to today's local date
-    let startDateStr = formatLocalYMD(new Date())
+    // Default to now (local) in DB-friendly format
+    let startDateStr = formatLocalDateTime(new Date())
     const assign = todayAssignments.value.find(a => a.serialNo === serial && (!processName || ((a.processName || a.process || '') || '').toLowerCase().includes((processName || '').toLowerCase())))
     if (assign && assign.startTime) {
       console.info("assign start time is", assign.startTime)
-      // string format expected: "2023-08-15"
-      startDateStr = formatLocalYMD(assign.startTime)
+      // Use the assignment's full local datetime (DB format)
+      startDateStr = formatLocalDateTime(assign.startTime)
       console.info("startDateStr is", startDateStr)
     }
-    const res = await axios.get('/api/WorkHours/find-workhour-id', { params: { workerName: worker, serialNo: serial, startDate: startDateStr } })
+
+    const res = await axios.get('/api/WorkHours/find-workhour-id', { params: { workerName: worker, serialNo: serial, startDateTime: startDateStr, processName: processName } })
     if (res && res.data && (res.data.id !== undefined && res.data.id !== null)) {
       selectedWorkHourId.value = res.data.id
     } else {
@@ -146,7 +146,7 @@ function onAssignmentClick(params) {
   void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
 }
 
-function onAssignmentCellClick(params) {
+async function onAssignmentCellClick(params) {
   // vxe-table cell-click provides { row, column, cell, rowIndex, columnIndex }
   const row = params?.row
   const col = params?.column
@@ -158,10 +158,16 @@ function onAssignmentCellClick(params) {
     if (isCompletedCell) return
     if (row?.serialNo) selectedSerial.value = row.serialNo
     selectedProcess.value = row?.processName || row?.process || ''
-    // resolve id for selection
-    void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
-    // switch to counting tab automatically
-    activeTab.value = 'counting'
+    // resolve id for selection and wait for it so TimerClock receives the id on creation
+    await resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+    if (selectedWorkHourId.value) {
+      // switch to counting tab only if we resolved a WorkHourId
+      activeTab.value = 'counting'
+    } else {
+      // no workhour found; keep selection and notify user
+      console.warn('No WorkHourId found for selected assignment', selectedSerial.value, selectedProcess.value)
+      // optional: alert('No WorkHour record found for this assignment.')
+    }
   } else {
     // fallback to row click behavior
     onAssignmentClick(params)
@@ -169,18 +175,19 @@ function onAssignmentCellClick(params) {
 }
 
 // Helper used by the State column button to start work for a row
-function startWorkFromRow(row) {
+async function startWorkFromRow(row) {
   if (!row) return
   // Prevent starting work for completed rows (case-insensitive)
   if ((row.state || '').toString().toLowerCase() === 'completed') return
   try {
     selectedSerial.value = row.serialNo
     selectedProcess.value = row.processName || row.process || ''
-    void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+    console.info("startWorkFromRow selectedSerial is", selectedSerial.value, "selectedProcess is", selectedProcess.value,"selectedWorkHourId is", selectedWorkHourId.value)
+    await resolveWorkHourId(selectedSerial.value, selectedProcess.value)
   } catch (e) {
     // ignore
   }
-  activeTab.value = 'counting'
+  if (selectedWorkHourId.value) activeTab.value = 'counting'
 }
 
 // Provide a row class function to dim completed rows
@@ -188,17 +195,7 @@ function rowClassName({ row }) {
   return row && row.state === 'Completed' ? 'row-completed' : ''
 }
 
-// When user navigates to counting tab without an explicit selection,
-// pick the first assignment and resolve its WorkHourId so TimerClock can use it.
 watch(activeTab, (nv) => {
-  if (nv === 'counting' && !selectedSerial.value && todayAssignments.value && todayAssignments.value.length) {
-    const first = todayAssignments.value[0]
-    if (first) {
-      selectedSerial.value = first.serialNo
-      selectedProcess.value = first.processName || first.process || ''
-      void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
-    }
-  }
   // When switching back to Task Arrangement, refresh today's assignments
   if (nv === 'task') {
     // re-check assignments so the table reflects recent submissions/assignments
@@ -254,7 +251,8 @@ function handleStartWork(payload) {
         Task Arrangement
       </button>
 
-      <button :class="{ active: activeTab === 'counting' }" @click="activeTab = 'counting'">Work Hour Counting Tool</button>
+      <!-- Disabled: users must select a row to enter counting mode -->
+      <button :class="{ active: activeTab === 'counting', disabled: true }" disabled title="Open a work item from Task Arrangement to switch to the Work Hour Counting Tool">Work Hour Counting Tool</button>
 
       <button
         :class="{ active: activeTab === 'intro', disabled: (isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted }"
