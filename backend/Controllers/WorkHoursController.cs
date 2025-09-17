@@ -19,7 +19,9 @@ namespace backend.Controllers
         private static string[] _workerNames = new string[0];
         private static string[] _processNames = new string[0];
         private static string[] _processEngineerNames = new string[0];
-        private readonly WorkSessionManager _sessionManager;
+        // Cached product definitions loaded once at startup to avoid file IO on every API call
+        private static System.Collections.Generic.List<object> _productDefinitions = new System.Collections.Generic.List<object>();
+         private readonly WorkSessionManager _sessionManager;
 
         static WorkHoursController()
         {
@@ -36,6 +38,45 @@ namespace backend.Controllers
                 }
             }
             catch { /* Optionally log or handle error */ }
+
+            // Load ProductDefinitions.csv once at startup and cache the parsed rows
+            try
+            {
+                var csvPath = Path.Combine(AppContext.BaseDirectory ?? string.Empty, "ProductDefinitions.csv");
+                if (System.IO.File.Exists(csvPath))
+                {
+                    var lines = System.IO.File.ReadAllLines(csvPath);
+                    if (lines != null && lines.Length > 0)
+                    {
+                        var header = lines[0].Split(',').Select(h => h.Trim()).ToArray();
+                        var list = new System.Collections.Generic.List<object>();
+                        for (int i = 1; i < lines.Length; i++)
+                        {
+                            if (string.IsNullOrWhiteSpace(lines[i])) continue;
+                            var cols = lines[i].Split(',').Select(c => c.Trim()).ToArray();
+                            string Get(string name)
+                            {
+                                var idx = Array.FindIndex(header, h => string.Equals(h, name, StringComparison.OrdinalIgnoreCase));
+                                if (idx >= 0 && idx < cols.Length) return cols[idx];
+                                return string.Empty;
+                            }
+
+                            list.Add(new
+                            {
+                                IvkNo = Get("ProductIvk"),
+                                ModalityType = Get("Modality"),
+                                ProductLine = Get("ProductLine"),
+                                SystemType = Get("SystemType")
+                            });
+                        }
+                        _productDefinitions = list;
+                    }
+                }
+            }
+            catch
+            {
+                // ignore: best-effort loading at startup
+            }
         }
 
         public WorkHoursController(ILogger<WorkHoursController> logger, WorkSessionManager sessionManager)
@@ -1068,6 +1109,14 @@ namespace backend.Controllers
                 _logger?.LogError(ex, "Error while fetching session for WorkHourId {WorkHourId}", workHourId);
                 return Problem(ex.Message);
             }
+        }
+
+        // GET: api/WorkHours/get-product-definitions
+        [HttpGet("get-product-definitions")]
+        public IActionResult GetProductDefinitions()
+        {
+            // Return the cached definitions loaded at startup
+            return Ok(_productDefinitions);
         }
 
         private class MIProdCommInfo
