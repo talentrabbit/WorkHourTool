@@ -83,21 +83,27 @@ const allowGuest = ref(false)
 const showLogon = ref(username.value === 'Guest' && !allowGuest.value)
 const overlayVisible = computed(() => showLogon.value || allowGuest.value)
 
-function applyUserFromResponse(data) {
+async function applyUserFromResponse(data) {
   if (!data) return
   username.value = data.fullName || data.user || data.gid || 'Guest'
   userRole.value = data.role || (Array.isArray(data.roles) && data.roles[0]) || ''
   try { localStorage.setItem('username', username.value) } catch {}
   try { localStorage.setItem('userRole', userRole.value) } catch {}
-  // Redirect based on role
+  // Redirect based on role and then reload the page so all data is re-fetched from the server
   const r = (userRole.value || '').toLowerCase()
-  if (r === 'productionmanager') {
-    router.push('/planning')
-  } else if (r === 'worker') {
-    router.push('/worker')
-  } else if (r === 'administrator') {
-    router.push('/')
+  try {
+    if (r === 'productionmanager') {
+      await router.push('/planning')
+    } else if (r === 'worker') {
+      await router.push('/worker')
+    } else if (r === 'administrator') {
+      await router.push('/')
+    }
+  } catch (e) {
+    // ignore routing errors
   }
+  // Force a full reload so mounted hooks re-run and data is fetched for the new user
+  try { window.location.reload() } catch (e) { /* ignore */ }
 }
 
 async function doLogon() {

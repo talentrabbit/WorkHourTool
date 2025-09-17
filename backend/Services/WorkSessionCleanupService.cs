@@ -143,6 +143,9 @@ namespace backend.Services
                                 // mark expired
                                 session.State = "Expired";
 
+                                // ensure EF Core tracks the change and will persist it to the database
+                                db.WorkSessions.Update(session);
+
                                 // Persist to WorkHour if referenced
                                 if (session.WorkHourId.HasValue)
                                 {

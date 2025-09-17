@@ -252,7 +252,7 @@ function handleStartWork(payload) {
       </button>
 
       <!-- Disabled: users must select a row to enter counting mode -->
-      <button :class="{ active: activeTab === 'counting', disabled: true }" disabled title="Open a work item from Task Arrangement to switch to the Work Hour Counting Tool">Work Hour Counting Tool</button>
+      <button :class="{ active: activeTab === 'counting', disabled: activeTab !== 'counting' }" disabled title="Open a work item from Task Arrangement to switch to the Work Hour Counting Tool">Work Hour Counting Tool</button>
 
       <button
         :class="{ active: activeTab === 'intro', disabled: (isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted }"
