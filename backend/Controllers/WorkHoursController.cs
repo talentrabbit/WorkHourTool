@@ -745,29 +745,36 @@ namespace backend.Controllers
             return Ok(new { message = "NCM saved and notifications attempted", results });
         }
 		
-		// GET: api/WorkHours/find-workhour-id?workerName=...&serialNo=...&startDate=yyyy-MM-dd
+		// GET: api/WorkHours/find-workhour-id?workerName=...&serialNo=...&startDateTime=yyyy-MM-ddTHH:mm:ss&processName=...
         [HttpGet("find-workhour-id")]
-        public IActionResult FindWorkHourId([FromQuery] string workerName, [FromQuery] string serialNo, [FromQuery] DateTime? startDate)
+        public IActionResult FindWorkHourId([FromQuery] string workerName, [FromQuery] string serialNo, [FromQuery] DateTime? startDateTime, [FromQuery] string? processName)
         {
-            if (string.IsNullOrWhiteSpace(workerName) || string.IsNullOrWhiteSpace(serialNo) || !startDate.HasValue)
+            // Validate required parameters
+            if (string.IsNullOrWhiteSpace(workerName) || string.IsNullOrWhiteSpace(serialNo) || !startDateTime.HasValue)
             {
-                return BadRequest(new { message = "workerName, serialNo and startDate (yyyy-MM-dd) are required" });
+                return BadRequest(new { message = "workerName, serialNo and startDateTime are required" });
             }
 
             using var db = new AppDbContext();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
-            if (product == null) return NotFound(new { message = "Product not found for SerialNo: " + serialNo });
+            if (product == null)
+            {
+                return NotFound(new { message = "Product not found for SerialNo: " + serialNo });
+            }
 
-            var dateStart = startDate.Value.Date;
-            var dateEnd = dateStart.AddDays(1);
+            // Query for a workhour matching the provided full StartTime and worker. If processName is provided, use it to narrow the search.
+            var query = db.WorkHours.AsNoTracking().Where(w => w.ProductId == product.Id && w.WorkerName == workerName && w.StartTime == startDateTime.Value);
+            if (!string.IsNullOrWhiteSpace(processName))
+            {
+                var pn = processName.Trim();
+                query = query.Where(w => (w.ProcessName ?? string.Empty).ToLower().Contains(pn.ToLower()));
+            }
 
-            var wh = db.WorkHours
-                .AsNoTracking()
-                .Where(w => w.ProductId == product.Id && w.WorkerName == workerName && w.StartTime >= dateStart && w.StartTime < dateEnd)
-                .OrderByDescending(w => w.StartTime)
-                .FirstOrDefault();
-
-            if (wh == null) return NotFound(new { message = "No WorkHour found for the given criteria" });
+            var wh = query.OrderByDescending(w => w.StartTime).FirstOrDefault();
+            if (wh == null)
+            {
+                return NotFound(new { message = "No matching WorkHour found" });
+            }
 
             return Ok(new { id = wh.Id });
         }

@@ -122,8 +122,8 @@ async function sendNcms() {
     return
   }
   // build payload from rows; include approximate Start/End from the current ncmTime
-  const start = Date.now()
-  const end = Date.now()
+  const start = new Date()
+  const end = new Date()
   const payload = ncmRows.value
     .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim())))
     .map(r => ({
@@ -238,7 +238,7 @@ async function setWorkingBackend(workHourId) {
     // Call the by-id endpoint which directly updates the WorkHour state
     const res = await axios.post('/api/WorkHours/set-working-by-id', payload)
     // backend acknowledges the update; keep id in state
-    console.log('Set working-by-id response', res.data)
+    console.log('Response of set-working-by-id', res.data)
     return workHourId
   } catch (err) {
     console.error('Failed to set working state by id', err)
@@ -254,6 +254,7 @@ function startClock() {
     alert('Work hours already submitted for this session. Reset clocks to start again.')
     return
   }
+  console.info("PreState: activeClock=", activeClock.value)
 
   // If clicking the active clock, pause it
   if (activeClock.value === 'active'){
@@ -263,18 +264,18 @@ function startClock() {
     activeClock.value = 'paused'
     // send heartbeat so server records ActiveClock='paused' and current elapsed
     void sendHeartbeat()
-    return
   }
   // Otherwise, start the selected clock
-  if (activeClock.value === 'paused'){
+  else if (activeClock.value === 'paused'){
     if (timer) clearInterval(timer)
     activeClock.value = 'active'
     if (isCountingTimerActive) isCountingTimerActive.value = true
     timer = setInterval(() => {
       if (activeClock.value === 'active') workTime.value++
     }, 1000)
-  }  
+  } 
 
+  console.info("PostState: activeClock=", activeClock.value)
   // If starting the work clock, ensure we have a WorkHour id and mark WorkHour as Working
   if (activeClock.value === 'active') {
     void setWorkingBackend(currentWorkHourId.value)
@@ -422,20 +423,6 @@ watch(() => props.initialWorkHourId, (nv, ov) => {
   }
 })
 
-// New: when the user switches to the counting tab, try to restore any existing session
-// Ensure we handle the case where the injected ref may be null by providing a fallback ref
-const _countingActive = isCountingTimerActive || ref(false)
-watch(_countingActive, (nv, ov) => {
-  // only act on activation (false -> true)
-  if (!nv) return
-  // require a selected WorkHourId to query for session
-  if (!currentWorkHourId.value) return
-  try {
-    void tryRestoreSessionForWorkHour()
-  } catch (e) {
-    console.error('Error while restoring session on tab switch', e)
-  }
-})
 
 const sessionId = ref(null)
 let heartbeatTimer = null
