@@ -3,6 +3,7 @@ using CsvHelper;
 using backend.Controllers;
 using backend.DbModel;
 using backend.Data;
+using Microsoft.EntityFrameworkCore;
 
 
 class ImportCsvToSQLite
@@ -33,8 +34,12 @@ class ImportCsvToSQLite
             return;
         }
 
-        AppDbContext.ConnectionString = $"Data Source={dbPath}";
-        using var db = new AppDbContext();
+        // Build DbContextOptions to construct AppDbContext (AppDbContext now expects DbContextOptions via DI)
+        var optionsBuilder = new DbContextOptionsBuilder<backend.Data.AppDbContext>();
+        optionsBuilder.UseSqlite($"Data Source={dbPath}");
+        var dbOptions = optionsBuilder.Options;
+
+        using var db = new backend.Data.AppDbContext(dbOptions);
         using var reader = new StreamReader(csvPath);
         using var csv = new CsvReader(reader, new CsvHelper.Configuration.CsvConfiguration(CultureInfo.InvariantCulture)
         {

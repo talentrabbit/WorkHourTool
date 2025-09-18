@@ -75,7 +75,13 @@
 
           <vxe-column field="startTimeActual" title="StartTimeActual" width="220">
             <template #default="{ row }">
-              <div>{{ formatDateTime(row.startTimeActual || row.startTime) }}</div>
+              <input type="datetime-local" :value="toLocalInput(row.startTimeActual || row.startTime)" @change="e => onStartChange(row, e.target.value, true)" class="cell-input" />
+            </template>
+          </vxe-column>
+
+          <vxe-column field="endTimeActual" title="EndTimeActual" width="220">
+            <template #default="{ row }">
+              <input type="datetime-local" :value="toLocalInput(row.endTimeActual || row.endTime)" @change="e => onEndChange(row, e.target.value, true)" class="cell-input" />
             </template>
           </vxe-column>
 
@@ -91,16 +97,13 @@
             </template>
           </vxe-column>
 
-          <vxe-column field="endTimeActual" title="EndTimeActual" width="220">
-            <template #default="{ row }">
-              <div>{{ formatDateTime(row.endTimeActual || row.endTime) }}</div>
-            </template>
-          </vxe-column>
+          
 
         </vxe-table>
       </div>
     </section>
 
+  <h2>NCM Time Maintenance</h2>
     <section class="collapsible">
       <header @click="toggle('ncm')" class="collapsible-header">
         <h3>NcmTimes</h3>
@@ -374,7 +377,7 @@ onMounted(loadAll)
 .collapsible-body{ padding:12px }
 .actions{ margin-bottom:8px }
 .cell-input{ width:100% }
-.eh-input{ width:110px }
+.eh-input{ width:80px }
 .modern-vxe-table{ font-size:13px }
 .filters{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap }
 .filter-input{ padding:6px 8px; border-radius:6px; border:1px solid #ddd }

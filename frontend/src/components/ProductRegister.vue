@@ -1,6 +1,6 @@
 <template>
   <div class="product-register">
-    <h3>Register New Product</h3>
+    <h3>Register New System</h3>
     <div class="register-grid">
       <div>
         <label>SerialNo</label>
@@ -37,7 +37,7 @@
     </div>
     
     <div style="margin-top:12px;">
-      <button class="assign-btn" @click="submit" :disabled="submitting">Create Product</button>
+      <button class="assign-btn" @click="submit" :disabled="submitting || !canSubmit">Create Product</button>
       <button class="cancel-btn" @click="reset" style="margin-left:8px;">Reset</button>
     </div>
     <div v-if="message" :class="{error: isError}" style="margin-top:12px">{{ message }}</div>
@@ -45,7 +45,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 
 const form = ref({ serialNo: '', modalityType: '', productLine: '', systemType: '', ivkNo: '' })
@@ -57,6 +57,11 @@ const modalityOptions = ref([])
 const productLineOptions = ref([])
 const systemTypeOptions = ref([])
 const ivkOptions = ref([])
+
+const canSubmit = computed(() => {
+  const f = form.value
+  return Boolean(f.serialNo && f.serialNo.trim() && f.modalityType && f.productLine && f.systemType)
+})
 
 function reset() {
   form.value = { serialNo: '', modalityType: '', productLine: '', systemType: '', ivkNo: '' }

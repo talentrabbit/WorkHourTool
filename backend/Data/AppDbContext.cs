@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using backend.DbModel;
+using System;
+using System.IO;
+using Microsoft.Extensions.Configuration;
 
 namespace backend.Data
 {
@@ -10,10 +13,54 @@ namespace backend.Data
         public DbSet<NcmTime> NcmTimes { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<WorkSession> WorkSessions { get; set; }
+
+        //overwritten by appsettings.json if present
         public static string DbProvider { get; set; } = "sqlite";
         public static string ConnectionString { get; set; } = "Data Source=workhour.db";
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
+            // If the DbContext was configured via DI (AddDbContext) the optionsBuilder will already be configured.
+            if (optionsBuilder.IsConfigured) return;
+
+            // Prefer configuration in appsettings.json (deployed next to the exe). This allows changing DbPath
+            // via appsettings.json when deploying the service.
+            try
+            {
+                var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+                var builder = new ConfigurationBuilder();
+                if (File.Exists(configPath))
+                {
+                    builder.SetBasePath(AppContext.BaseDirectory).AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+                    var cfg = builder.Build();
+                    var configuredDbPath = cfg["DbPath"];
+                    var configuredProvider = cfg["DbProvider"];
+
+                    if (!string.IsNullOrWhiteSpace(configuredDbPath))
+                    {
+                        var dbPath = Path.IsPathRooted(configuredDbPath) ? configuredDbPath : Path.Combine(AppContext.BaseDirectory, configuredDbPath);
+                        var conn = $"Data Source={dbPath}";
+                        Console.WriteLine($"Using database path from appsettings.json: {dbPath}");
+                        var provider = string.IsNullOrWhiteSpace(configuredProvider) ? DbProvider : configuredProvider;
+                        if (provider?.ToLowerInvariant() == "sqlite")
+                        {
+                            optionsBuilder.UseSqlite(conn);
+                            return;
+                        }
+                        else if (provider?.ToLowerInvariant() == "sqlserver")
+                        {
+                            optionsBuilder.UseSqlServer(conn);
+                            return;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore and fall through to static fallback
+            }
+
+            // Fallback to static configuration present for compatibility with older startup code.
             if (DbProvider == "sqlite")
             {
                 optionsBuilder.UseSqlite(ConnectionString);
@@ -23,6 +70,7 @@ namespace backend.Data
                 optionsBuilder.UseSqlServer(ConnectionString);
             }
         }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Product>()
