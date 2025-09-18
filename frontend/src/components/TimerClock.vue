@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed, defineEmits } from 'vue'
+import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed, defineEmits, nextTick } from 'vue'
 import axios from 'axios'
 // Sync timer state with parent for disabling tabs
 const isCountingTimerActive = inject('isCountingTimerActive', null)
@@ -78,6 +78,39 @@ const processEngineer = ref('')
 const ncmAction = ref('')
 const showNcmInputs = ref(false)
 const submitted = ref(false)
+
+// Confirmation modal state for submitting work hours
+const showSubmitConfirm = ref(false)
+const confirmCancelBtn = ref(null)
+
+// Transient message (fade-out) state
+const messageText = ref('')
+const messageVisible = ref(false)
+let messageTimeout = null
+
+function showTransientMessage(text, ms = 3000) {
+  if (messageTimeout) { clearTimeout(messageTimeout); messageTimeout = null }
+  messageText.value = text
+  messageVisible.value = true
+  messageTimeout = setTimeout(() => { messageVisible.value = false; messageTimeout = null }, ms)
+}
+
+async function requestSubmitWorkHours() {
+  if (submitted.value) return
+  showSubmitConfirm.value = true
+  await nextTick()
+  try { confirmCancelBtn.value?.focus() } catch (e) { /* ignore */ }
+}
+
+function cancelSubmit() {
+  showSubmitConfirm.value = false
+}
+
+function confirmSubmit() {
+  showSubmitConfirm.value = false
+  // call the (possibly wrapped) submitWorkHours function
+  void submitWorkHours()
+}
 
 // New: support multiple NCM entries and dropdown options
 const processEngineerOptions = ref([])
@@ -293,23 +326,18 @@ async function submitWorkHours() {
     const id = currentWorkHourId.value 
     if (!id) {
       alert('No WorkHour record found to complete')
-      return
-    }
-
-    if (!window.confirm('This will submit your work hour, and the operation can not be revert! Continue?')) {
-      return
+      return false
     }
 
     // compute hours from timers (rounded to 2 decimals)
     const effectiveHours = Math.round((workTime.value / 3600) * 100) / 100
-    const reportedNcmHours = Math.round((ncmTime.value / 3600) * 100) / 100
 
     // build payload
     const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest', EffectiveHours: effectiveHours }
-   
+
     payload.ProcessEngineer = processEngineer.value || null
     payload.NcmAction = ncmAction.value || null
-    
+
 
     const res = await axios.post('/api/WorkHours/complete', payload)
     console.log('Complete response', res.data)
@@ -327,10 +355,13 @@ async function submitWorkHours() {
     // emit an event as well so parent can react if provide/inject didn't reach it
     try { emit('work-submitted') } catch (e) { /* ignore in older runtimes */ }
 
-    alert('Work hour completed.')
+    // show fade-out message instead of blocking alert
+    showTransientMessage('Work hour completed.')
+    return true
   } catch (err) {
     console.error('Failed to complete work hour', err)
     alert('Failed to complete work hour')
+    return false
   }
 }
 
@@ -427,6 +458,12 @@ watch(() => props.initialWorkHourId, (nv, ov) => {
 const sessionId = ref(null)
 let heartbeatTimer = null
 const HEARTBEAT_INTERVAL_MS = 15000 // 15s
+// Milliseconds to wait for heartbeat response before marking disconnected
+const HEARTBEAT_TIMEOUT_MS = 5000 // 5s
+const disconnected = ref(false)
+
+// Optional: count consecutive failures if you want backoff or auto-retry behavior
+let consecutiveHeartbeatFailures = 0
 
 async function startSessionIfNeeded() {
   if (sessionId.value) return
@@ -470,7 +507,11 @@ async function sendHeartbeat() {
       ActiveClock: activeClock.value === 'active' ? 'active' : 'paused', // send 'paused' to DB when not active
       MetadataJson: JSON.stringify({ ncmCount: ncmRows.value.length }),
       State: submitted.value ? 'Completed' : 'Working'
-    })
+    }, { timeout: HEARTBEAT_TIMEOUT_MS })
+
+    // on success, clear disconnected state and reset failure counter
+    disconnected.value = false
+    consecutiveHeartbeatFailures = 0
 
     // If server responded with updated elapsedSeconds, use it (but only if it's larger)
     const serverElapsed = res?.data?.elapsedSeconds
@@ -487,6 +528,11 @@ async function sendHeartbeat() {
     }
   } catch (err) {
     console.error('Heartbeat failed', err)
+    // mark disconnected when request times out or network fails
+    consecutiveHeartbeatFailures++
+    if (consecutiveHeartbeatFailures >= 1) {
+      disconnected.value = true
+    }
   }
 }
 
@@ -515,7 +561,16 @@ startClock = function() {
 // after submitWorkHours completes we mark session completed
 const originalSubmit = submitWorkHours
 submitWorkHours = async function() {
-  await originalSubmit()
+  // Call original submit and only proceed with final heartbeat/stop if a submission actually occurred
+  try {
+    const didSubmit = await originalSubmit()
+    if (!didSubmit) return
+  } catch (e) {
+    // if original throws, avoid proceeding
+    console.error('submit wrapper: original submit failed', e)
+    return
+  }
+
   // send final heartbeat and stop session tracking
   try {
     await sendHeartbeat()
@@ -545,6 +600,10 @@ onBeforeUnmount(() => {
       <span><strong>WorkHour Accumulated:</strong> {{ workHourOverall }}</span>
       <span><strong>NCM Hours:</strong> {{ ncmHours }}</span>
     </div>
+    <!-- Disconnection banner: shown when heartbeats fail -->
+    <div v-if="disconnected" class="disconnected-banner" role="alert" aria-live="assertive">
+      ⚠️ Disconnected from Server. Please check your network!
+    </div>
     <div class="workhour-seat-info">
       <span><strong>Process:</strong> {{ process }}</span>
       <span><strong>Worker:</strong> {{ username }}</span>
@@ -563,7 +622,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="reset-btn-row">
       <span class="reset-btn-spacer"></span>
-      <button class="submit-btn" @click="submitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
+      <button class="submit-btn" @click="requestSubmitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
       <span class="reset-btn-spacer"></span>
       <button class="reset-btn" @click="resetClocks" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Will reset Work Hour Clock!">⟳</button>
     </div>
@@ -595,6 +654,20 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    <!-- Confirmation modal for submitting work hours -->
+    <div v-if="showSubmitConfirm" class="confirm-overlay" role="dialog" aria-modal="true">
+      <div class="confirm-dialog">
+        <div class="confirm-title">Confirm Submission</div>
+        <div class="confirm-body">This will submit your work hour, and the operation cannot be reverted. Continue?</div>
+        <div class="confirm-buttons">
+          <button ref="confirmCancelBtn" class="confirm-btn cancel" @click="cancelSubmit">Cancel</button>
+          <button class="confirm-btn confirm" @click="confirmSubmit">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transient fade-out message -->
+    <div v-if="messageVisible" class="fade-message" role="status" aria-live="polite">{{ messageText }}</div>
   </div>
 </template>
 
@@ -904,4 +977,56 @@ onBeforeUnmount(() => {
 .chevron.open {
   transform: rotate(180deg);
 }
+.disconnected-banner {
+  background: #fff4f4;
+  color: #7a1f1f;
+  border: 1px solid #f5c6cb;
+  padding: 0.6rem 1rem;
+  margin: 0.6rem 0;
+  border-radius: 6px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.35);
+  z-index: 1000;
+}
+.confirm-dialog {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.2rem;
+  width: 420px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.confirm-title { font-weight: 700; color: #e74c3c; }
+.confirm-body { color: #333; }
+.confirm-buttons { display:flex; justify-content:flex-end; gap:0.5rem; }
+.confirm-btn { padding: 0.5rem 0.9rem; border-radius:6px; border:none; cursor:pointer; }
+.confirm-btn.cancel { background:#eee; color:#333; }
+.confirm-btn.confirm { background:#e74c3c; color:#fff; }
+
+.fade-message {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: #42b883;
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  opacity: 1;
+  transition: opacity 0.45s ease-in-out, transform 0.45s ease-in-out;
+}
+.fade-message[style*="display: none"] { opacity: 0 }
+.fade-message[aria-hidden="true"] { opacity: 0 }
 </style>
