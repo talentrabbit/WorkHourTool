@@ -343,7 +343,7 @@ namespace backend.Controllers
         
         // GET: api/WorkHours/worker-assignments?workerName=...
         [HttpGet("worker-assignments")]
-        public IActionResult GetWorkerAssignments([FromQuery] string workerName)
+        public IActionResult GetWorkerAssignments([FromQuery] string workerName, [FromQuery] DateTime? startDate, [FromQuery] DateTime? endDate)
         {                   
             if (string.IsNullOrWhiteSpace(workerName))
             {
@@ -355,12 +355,22 @@ namespace backend.Controllers
                 .Include(w => w.Product)
                 .Where(w => w.WorkerName == workerName);
 
+            // Apply optional date window filtering on StartTime to avoid returning the worker's entire history
+            if (startDate.HasValue)
+            {
+                query = query.Where(w => w.StartTime >= startDate.Value);
+            }
+            if (endDate.HasValue)
+            {
+                query = query.Where(w => w.StartTime <= endDate.Value);
+            }
+
             // Materialize the workhours for the worker first to avoid EF Core translation issues with complex correlated subqueries
             var rows = query
                 .OrderByDescending(w => w.StartTime)
                 .ToList();
             
-            _logger.LogInformation("Fetching work assignments for WorkerName: {WorkerName}", workerName);
+            _logger.LogInformation("Fetching work assignments for WorkerName: {WorkerName} (startDate={StartDate}, endDate={EndDate})", workerName, startDate, endDate);
 
             // Build the result in-memory; for each row, perform a small lookup to find an associated co-worker if present
             var result = rows.Select(w =>

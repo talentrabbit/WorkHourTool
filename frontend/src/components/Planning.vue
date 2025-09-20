@@ -454,26 +454,24 @@ async function openProductFromSerial(serial) {
 
 async function updateWorkerAssignments() {
   try {
+    // request only assignments from 2 days ago onward to avoid large result sets
+    const threshold = new Date()
+    threshold.setDate(threshold.getDate() - 2)
+    const startDateParam = `${threshold.getFullYear()}-${String(threshold.getMonth()+1).padStart(2,'0')}-${String(threshold.getDate()).padStart(2,'0')}`
+
     const res = await axios.get('/api/WorkHours/worker-assignments', {
-      params: { workerName: task.value.workerName }
+      params: { workerName: task.value.workerName, startDate: startDateParam }
     })
     if (Array.isArray(res.data)) {
-      // hide assignments earlier than 2 days before today
-      const threshold = new Date()
-      threshold.setDate(threshold.getDate() - 2)
-      existingAssignments.value = res.data
-        .filter(a => {
-          const s = a && a.startTime ? new Date(a.startTime) : null
-          return !s || s >= threshold
-        })
-        .map(a => ({
-          serialNo: a.serialNo,
-          systemType: a.systemType,
-          processName: a.processName,
-          coWorkerName: a.coWorkerName || '',
-          startTime: a.startTime,
-          endTime: a.endTime
-        }))
+      // server should already filter to recent rows; map directly
+      existingAssignments.value = res.data.map(a => ({
+        serialNo: a.serialNo,
+        systemType: a.systemType,
+        processName: a.processName,
+        coWorkerName: a.coWorkerName || '',
+        startTime: a.startTime,
+        endTime: a.endTime
+      }))
     } else {
       existingAssignments.value = []
     }
@@ -487,10 +485,16 @@ async function updateWorkerAssignments() {
 
 async function updateCoWorkerAssignments() {
   try {
+    // request only assignments from 2 days ago onward
+    const threshold = new Date()
+    threshold.setDate(threshold.getDate() - 2)
+    const startDateParam = `${threshold.getFullYear()}-${String(threshold.getMonth()+1).padStart(2,'0')}-${String(threshold.getDate()).padStart(2,'0')}`
+
     const res = await axios.get('/api/WorkHours/worker-assignments', {
-      params: { workerName: task.value.coWorkerName }
+      params: { workerName: task.value.coWorkerName, startDate: startDateParam }
     })
     if (Array.isArray(res.data)) {
+      // map server-filtered rows directly
       coWorkerAssignments.value = res.data.map(a => ({
         serialNo: a.serialNo,
         systemType: a.systemType,
@@ -510,16 +514,15 @@ async function updateCoWorkerAssignments() {
 
 async function updateNonProductWorkerAssignments() {
   try {
-    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: nonProductTask.value.workerName } })
+    const threshold = new Date()
+    threshold.setDate(threshold.getDate() - 2)
+    const startDateParam = `${threshold.getFullYear()}-${String(threshold.getMonth()+1).padStart(2,'0')}-${String(threshold.getDate()).padStart(2,'0')}`
+
+    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: nonProductTask.value.workerName, startDate: startDateParam } })
     if (Array.isArray(res.data)) {
       const threshold = new Date()
       threshold.setDate(threshold.getDate() - 2)
-      nonProductExistingAssignments.value = res.data
-        .filter(a => {
-          const s = a && a.startTime ? new Date(a.startTime) : null
-          return !s || s >= threshold
-        })
-        .map(a => ({
+      nonProductExistingAssignments.value = res.data.map(a => ({
           serialNo: a.serialNo,
           systemType: a.systemType,
           processName: a.processName,
@@ -540,7 +543,11 @@ async function updateNonProductWorkerAssignments() {
 
 async function updateNonProductCoWorkerAssignments() {
   try {
-    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: nonProductTask.value.coWorkerName } })
+    const threshold = new Date()
+    threshold.setDate(threshold.getDate() - 2)
+    const startDateParam = `${threshold.getFullYear()}-${String(threshold.getMonth()+1).padStart(2,'0')}-${String(threshold.getDate()).padStart(2,'0')}`
+
+    const res = await axios.get('/api/WorkHours/worker-assignments', { params: { workerName: nonProductTask.value.coWorkerName, startDate: startDateParam } })
     if (Array.isArray(res.data)) {
       nonCoWorkerAssignments.value = res.data.map(a => ({
         serialNo: a.serialNo,
@@ -596,45 +603,84 @@ async function assignTask() {
     alert(`Selected time range conflicts with existing assignment for ${conflictFor.value}.`)
     return
   }
-  const hours = computeHoursMinusLunch(startDt, endDt)
-  // Primary worker
-  let primaryPlanned = hours
-  try {
-    const resPrimary = await axios.post('/api/WorkHours/submit-work-hours', {
-      SerialNo: product.value.serialNo,
-      WorkerName: task.value.workerName,
-      ProcessName: task.value.process,
-      Hours: hours,
-      StartTime: startStr,
-      EndTime: endStr
-    })
-    // Prefer server-returned planned hours when present (flattened response expected)
-    primaryPlanned = Number(resPrimary.data?.plannedHours ??  hours)
-  } catch (e) {
-    console.error('Failed to submit primary assignment', e)
-  }
 
-  // Optional co-worker
-  let coPlanned = null
-  if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
+  // If the assignment spans multiple days, create one WorkHour record per calendar day.
+  function pad(n){ return String(n).padStart(2,'0') }
+  const firstDay = new Date(startDt.getFullYear(), startDt.getMonth(), startDt.getDate())
+  const lastDay = new Date(endDt.getFullYear(), endDt.getMonth(), endDt.getDate())
+
+  let primaryPlanned = 0
+  // iterate each day and submit one record per day
+  for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+    // determine day-specific start/end
+    const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
+    const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
+
+    const dayStart = isFirst ? startDt : new Date(d.getFullYear(), d.getMonth(), d.getDate(), parseInt(task.value.startTime.split(':')[0]||0), parseInt(task.value.startTime.split(':')[1]||0), 0)
+    const dayEnd = isLast ? endDt : new Date(d.getFullYear(), d.getMonth(), d.getDate(), parseInt(task.value.endTime.split(':')[0]||0), parseInt(task.value.endTime.split(':')[1]||0), 0)
+
+    if (isNaN(dayStart.getTime()) || isNaN(dayEnd.getTime()) || dayEnd <= dayStart) {
+      // skip invalid day ranges
+      continue
+    }
+
+    const dayDateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+    const sStr = `${dayDateStr}T${pad(dayStart.getHours())}:${pad(dayStart.getMinutes())}:00`
+    const eStr = `${dayDateStr}T${pad(dayEnd.getHours())}:${pad(dayEnd.getMinutes())}:00`
+
+    const hoursForDay = computeHoursMinusLunch(dayStart, dayEnd)
     try {
-      const resCo = await axios.post('/api/WorkHours/submit-work-hours', {
+      const resPrimary = await axios.post('/api/WorkHours/submit-work-hours', {
         SerialNo: product.value.serialNo,
-        WorkerName: task.value.coWorkerName,
+        WorkerName: task.value.workerName,
         ProcessName: task.value.process,
-        Hours: hours,
-        StartTime: startStr,
-        EndTime: endStr
+        Hours: hoursForDay,
+        StartTime: sStr,
+        EndTime: eStr
       })
-      coPlanned = Number(resCo.data?.plannedHours ?? hours)
+      primaryPlanned += Number(resPrimary.data?.plannedHours ?? hoursForDay)
     } catch (e) {
-      console.error('Failed to submit co-worker assignment', e)
+      console.error('Failed to submit primary assignment for day', dayDateStr, e)
     }
   }
 
-  // Build success message including planned hours for both workers and include start date
-  let msg = `Task assigned on ${task.value.startDate}. Planned hours - ${task.value.workerName}: ${primaryPlanned.toFixed(2)}.`
-  if (coPlanned !== null)   msg += `; ${task.value.coWorkerName}: ${coPlanned.toFixed(2)}`
+  // Optional co-worker: submit one record per day as well
+  let coPlanned = null
+  if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
+    coPlanned = 0
+    for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+      const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
+      const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
+
+      const dayStart = isFirst ? startDt : new Date(d.getFullYear(), d.getMonth(), d.getDate(), parseInt(task.value.startTime.split(':')[0]||0), parseInt(task.value.startTime.split(':')[1]||0), 0)
+      const dayEnd = isLast ? endDt : new Date(d.getFullYear(), d.getMonth(), d.getDate(), parseInt(task.value.endTime.split(':')[0]||0), parseInt(task.value.endTime.split(':')[1]||0), 0)
+
+      if (isNaN(dayStart.getTime()) || isNaN(dayEnd.getTime()) || dayEnd <= dayStart) continue
+
+      const dayDateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+      const sStr = `${dayDateStr}T${pad(dayStart.getHours())}:${pad(dayStart.getMinutes())}:00`
+      const eStr = `${dayDateStr}T${pad(dayEnd.getHours())}:${pad(dayEnd.getMinutes())}:00`
+
+      const hoursForDay = computeHoursMinusLunch(dayStart, dayEnd)
+      try {
+        const resCo = await axios.post('/api/WorkHours/submit-work-hours', {
+          SerialNo: product.value.serialNo,
+          WorkerName: task.value.coWorkerName,
+          ProcessName: task.value.process,
+          Hours: hoursForDay,
+          StartTime: sStr,
+          EndTime: eStr
+        })
+        coPlanned += Number(resCo.data?.plannedHours ?? hoursForDay)
+      } catch (e) {
+        console.error('Failed to submit co-worker assignment for day', dayDateStr, e)
+      }
+    }
+  }
+
+  // Build success message including total planned hours and date range
+  let msg = `Task assigned from ${task.value.startDate} to ${task.value.endDate}. Planned hours total - ${task.value.workerName}: ${primaryPlanned.toFixed(2)}.`
+  if (coPlanned !== null) msg += `; ${task.value.coWorkerName}: ${coPlanned.toFixed(2)}`
 
   alert(msg)
   if (task.value.workerName) await updateWorkerAssignments()
