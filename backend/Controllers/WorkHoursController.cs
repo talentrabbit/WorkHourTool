@@ -133,6 +133,21 @@ namespace backend.Controllers
             db.WorkHours.Add(workHour);
             db.SaveChanges();
 
+            // If requested, attempt to record a notification request or log for production manager
+            if (dto.IfToInformProductionManager)
+            {
+                try
+                {
+                    _logger?.LogInformation("Worker-submitted WorkHour {WorkHourId} flagged to inform production manager", workHour.Id);
+                    // Optionally create a notification table row or send an async notification here.
+                    // For now, we just log; expand in future to integrate with email/Teams/Outlook.
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to log production manager inform intent for WorkHour {WorkHourId}", workHour.Id);
+                }
+            }
+
             // Return a flat response to make it easy for front-end to pick up planned hours
             return Ok(new
             {
@@ -1144,6 +1159,9 @@ namespace backend.Controllers
             public double Hours { get; set; }
             public DateTime StartTime { get; set; }
             public DateTime EndTime { get; set; }
+
+            // New flag: when true, front-end requests informing production manager
+            public bool IfToInformProductionManager { get; set; } = false;
         }
 
         public class CompleteWorkHourRequest

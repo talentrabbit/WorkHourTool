@@ -20,6 +20,7 @@
           <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
           <router-link v-if="isProcess || isAdmin" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
           <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">WorkHour Maintenance</router-link>
+          <router-link v-if="isAdmin || isManager" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
         </nav>
       </aside>
       <main class="portal-content">
@@ -84,27 +85,33 @@ const showLogon = ref(username.value === 'Guest' && !allowGuest.value)
 const overlayVisible = computed(() => showLogon.value || allowGuest.value)
 
 async function applyUserFromResponse(data) {
-  if (!data) return
-  username.value = data.fullName || data.user || data.gid || 'Guest'
-  userRole.value = data.role || (Array.isArray(data.roles) && data.roles[0]) || ''
-  try { localStorage.setItem('username', username.value) } catch {}
-  try { localStorage.setItem('userRole', userRole.value) } catch {}
-  // Redirect based on role and then reload the page so all data is re-fetched from the server
-  const r = (userRole.value || '').toLowerCase()
-  try {
-    if (r === 'productionmanager') {
-      await router.push('/planning')
-    } else if (r === 'worker') {
-      await router.push('/worker')
-    } else if (r === 'administrator') {
-      await router.push('/')
+    if (!data) return
+    // remember previous values to avoid unnecessary navigation
+    const prevUser = username.value
+    const prevRole = userRole.value
+
+    username.value = data.fullName || data.user || data.gid || 'Guest'
+    userRole.value = data.role || (Array.isArray(data.roles) && data.roles[0]) || ''
+    try { localStorage.setItem('username', username.value) } catch {}
+    try { localStorage.setItem('userRole', userRole.value) } catch {}
+
+    // Navigate based on role but DO NOT force a full page reload.
+    // Full reload caused an infinite refresh loop in some dev setups (blocked localStorage or proxy behavior).
+    const r = (userRole.value || '').toLowerCase()
+    try {
+      if (r === 'productionmanager') {
+        await router.push('/planning')
+      } else if (r === 'worker') {
+        await router.push('/worker')
+      } else if (r === 'administrator') {
+        await router.push('/')
+      }
+    } catch (e) {
+      // ignore routing errors
     }
-  } catch (e) {
-    // ignore routing errors
+
+    // Do not call window.location.reload() here — let components handle their own mounted/data refresh.
   }
-  // Force a full reload so mounted hooks re-run and data is fetched for the new user
-  try { window.location.reload() } catch (e) { /* ignore */ }
-}
 
 async function doLogon() {
   const v = (logonName.value || '').trim()
@@ -123,7 +130,7 @@ async function doLogon() {
       return
     }
     console.error(err)
-    alert('Failed to look up user')
+    alert(`Failed to look up user: ${err.message}`)
     return
   }
 }
@@ -223,7 +230,7 @@ onMounted(async () => {
 .logon-modal h2 { margin: 0 0 8px 0; color: #EC6602; }
 .logon-desc { margin: 0 0 16px 0; color: #5a3b27; }
 .logon-input { width: 100%; padding: 10px 12px; border: 1px solid #E6C9B0; border-radius: 8px; margin-bottom: 16px; }
-.logon-actions { display:flex; justify-content:center }
+ .logon-actions{ display:flex; justify-content:center }
 .btn { background: #EC6602; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; }
 .btn:hover { opacity: 0.95 }
 

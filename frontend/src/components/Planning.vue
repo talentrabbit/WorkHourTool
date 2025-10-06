@@ -400,7 +400,9 @@ async function fetchAllProducts() {
       // exclude the placeholder non-product record (SerialNo '999999') so it doesn't appear in All Products
       const items = res.data.filter(p => {
         const sn = (p.serialNo ?? p.SerialNo ?? '').toString()
-        return sn !== '999999'
+        const systemProcess = (p.workingProcess ?? p.WorkingProcess ?? '').toString().toLowerCase()
+        // also exclude any items marked as 'Delivered' in WorkingProcess
+        return sn !== '999999' && systemProcess !== 'delivered'
       })
       allProducts.value = items.map(p => ({
         serialNo: p.serialNo ?? p.SerialNo,

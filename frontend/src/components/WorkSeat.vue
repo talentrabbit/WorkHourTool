@@ -146,10 +146,14 @@ function computeHoursMinusLunch(start, end) {
   return Math.max(0, totalMs / 36e5)
 }
 
+let isSubmitting = ref(false)
+
 async function startWork(){
+  if (isSubmitting.value) return
   if (!form.value.seriesNo) { alert('Please select a Series No.'); return }
   if (!form.value.process) { alert('Please select a Process'); return }
   if (coworkerConflict.value){ alert('One or more selected co-workers have assignments today. Remove them or pick another date.'); return }
+
   // compute start/end datetimes
   const startStr = `${form.value.startDate}T${form.value.startTime}:00`
   const endStr = `${form.value.endDate}T${form.value.endTime}:00`
@@ -158,54 +162,105 @@ async function startWork(){
   if (isNaN(startDt.getTime()) || isNaN(endDt.getTime()) || endDt <= startDt) {
     alert('Please ensure start time is before end time.'); return
   }
-  const hours = computeHoursMinusLunch(startDt, endDt)
-  try {
-    const payload = {
-      SerialNo: form.value.seriesNo,
-      WorkerName: (username && username.value) ? username.value : 'Guest',
-      ProcessName: form.value.process,
-      Hours: hours,
-      StartTime: startStr,
-      EndTime: endStr
-    }
-    const res = await axios.post('/api/WorkHours/submit-work-hours', payload)
-    // backend returns { message, data: { Id: ... } }
-    const newId = res?.data?.data?.Id ?? res?.data?.data?.id
-    console.log('Start Work created id=', newId, res.data)
 
-    // Also create records for selected co-workers (reuse SerialNo and ProcessName)
+  isSubmitting.value = true
+  try {
+    // determine if current user is a worker (simple heuristic: username provided and not Guest)
+    const submittingUser = (username && username.value) ? username.value : 'Guest'
+    const isWorkerLogin = submittingUser && submittingUser !== 'Guest'
+    // Note: caller may provide a more robust role check via injected userRole if available; for now use presence
+
+    // split into per-day records
+    function pad(n){ return String(n).padStart(2,'0') }
+    const firstDay = new Date(startDt.getFullYear(), startDt.getMonth(), startDt.getDate())
+    const lastDay = new Date(endDt.getFullYear(), endDt.getMonth(), endDt.getDate())
+
+    const createdIds = []
+    const createdRecords = []
+
+    for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+      const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
+      const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
+
+      const dayStart = isFirst ? startDt : new Date(d.getFullYear(), d.getMonth(), d.getDate(), parseInt(form.value.startTime.split(':')[0]||0), parseInt(form.value.startTime.split(':')[1]||0), 0)
+      const dayEnd = isLast ? endDt : new Date(d.getFullYear(), d.getMonth(), d.getDate(), parseInt(form.value.endTime.split(':')[0]||0), parseInt(form.value.endTime.split(':')[1]||0), 0)
+
+      if (isNaN(dayStart.getTime()) || isNaN(dayEnd.getTime()) || dayEnd <= dayStart) { continue }
+
+      const dayDateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+      const sStr = `${dayDateStr}T${pad(dayStart.getHours())}:${pad(dayStart.getMinutes())}:00`
+      const eStr = `${dayDateStr}T${pad(dayEnd.getHours())}:${pad(dayEnd.getMinutes())}:00`
+      const hrs = computeHoursMinusLunch(dayStart, dayEnd)
+
+      const payload = {
+        SerialNo: form.value.seriesNo,
+        WorkerName: submittingUser,
+        ProcessName: form.value.process,
+        Hours: hrs,
+        StartTime: sStr,
+        EndTime: eStr,
+        IfToInformProductionManager: !!isWorkerLogin
+      }
+
+      try {
+        const res = await axios.post('/api/WorkHours/submit-work-hours', payload)
+        // backend may return flat { id } or wrapped { data: { id } } or { data: { Id } }
+        const id = res?.data?.id ?? res?.data?.data?.id ?? res?.data?.data?.Id ?? res?.data?.data?.ID ?? null
+        if (id) createdIds.push({ id, date: dayDateStr })
+        createdRecords.push({ payload, response: res?.data })
+      } catch (e) {
+        console.error('Failed to create workhour for day', dayDateStr, e)
+        // continue creating remaining days
+      }
+    }
+
+    // also create records for selected co-workers (one record per day per co-worker)
     if (Array.isArray(form.value.coWorkers) && form.value.coWorkers.length) {
-      const coWorkersToCreate = form.value.coWorkers.filter(cw => cw && cw !== payload.WorkerName)
+      const coWorkersToCreate = form.value.coWorkers.filter(cw => cw && cw !== submittingUser)
       for (const cw of coWorkersToCreate) {
-        try {
-          const coPayload = {
-            SerialNo: form.value.seriesNo,
-            WorkerName: cw,
-            ProcessName: form.value.process,
-            Hours: hours,
-            StartTime: startStr,
-            EndTime: endStr
+        for (const rec of createdRecords) {
+          try {
+            const coPayload = {
+              SerialNo: form.value.seriesNo,
+              WorkerName: cw,
+              ProcessName: form.value.process,
+              Hours: rec.payload.Hours,
+              StartTime: rec.payload.StartTime,
+              EndTime: rec.payload.EndTime,
+              IfToInformProductionManager: !!isWorkerLogin
+            }
+            const cres = await axios.post('/api/WorkHours/submit-work-hours', coPayload)
+            console.log('Created co-worker workhour for', cw, cres.data)
+          } catch (ce) {
+            console.error('Failed to create co-worker workhour for', cw, ce)
           }
-          const cres = await axios.post('/api/WorkHours/submit-work-hours', coPayload)
-          console.log('Created co-worker workhour for', cw, cres.data)
-        } catch (ce) {
-          console.error('Failed to create co-worker workhour for', cw, ce)
         }
       }
     }
 
+    // Choose today's created id if present, otherwise pick the first created id
+    const todayStr = new Date().toISOString().slice(0,10)
+    let chosen = null
+    if (createdIds.length) {
+      const todayRec = createdIds.find(x => x.date === todayStr)
+      chosen = todayRec ? todayRec.id : createdIds[0].id
+    }
+
     // emit to parent with created primary workHour id so it can switch to counting and pass id to TimerClock
-    emit('start-work-and-switch', { workHourId: newId, serialNo: form.value.seriesNo, process: form.value.process })
+    emit('start-work-and-switch', { workHourId: chosen, serialNo: form.value.seriesNo, process: form.value.process })
+
   } catch (err) {
     console.error('Failed to create work hour', err)
     alert('Failed to start work. See console for details.')
+  } finally {
+    isSubmitting.value = false
   }
 }
 </script>
 
 <template>
   <div class="workseat-container">
-    <h2>Work Hours for Current Product</h2>
+    <h2>Self-service Production Scheduling</h2>
 
     <div class="form-row">
       <label for="seriesNo">Select Series No.</label>
