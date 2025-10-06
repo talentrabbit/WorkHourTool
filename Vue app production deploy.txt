@@ -1,0 +1,52 @@
+Good — here are concise, practical deployment options and recommended steps so colleagues on the intranet can reach the frontend.
+
+Quick choices (pick one)
+- Serve the built SPA from the ASP.NET backend (copy Vite build into backend/wwwroot). Easiest if you already run the backend as a Windows Service.
+- Host the static site with IIS (preferred on Windows intranet) and reverse-proxy API requests to your backend.
+- Host the site with a lightweight static server or nginx on a VM and reverse-proxy API requests to the backend.
+- Use a simple file share + minimal webserver only for internal demo (least recommended long-term).
+
+Recommended approach (serve SPA from backend/wwwroot)
+1. Build the frontend for production
+   - npm run build (or yarn build)
+   - Ensure VITE_API_BASE_URL is set so the client calls the right API host (for same-origin, leave it empty and serve SPA from same host + port as API).
+2. Copy the built files
+   - Copy the generated dist/ (Vite) into the backend publish folder under wwwroot (e.g. E:\MISCMFactoryService\backend\wwwroot).
+3. Ensure backend serves static files
+   - Confirm Program.cs calls app.UseDefaultFiles(); and app.UseStaticFiles(); before app.MapControllers(); so index.html is served for root.
+   - For SPA routing (history mode), add fallback to index.html (UseSpa or custom middleware / URL rewrite).
+4. Restart the backend service
+   - Restart your Windows Service so the new files are picked up.
+5. DNS, firewall, and access
+   - Create an intranet DNS name (e.g. factory-ui.company.local) pointing to the server.
+   - Open the server port in firewall (HTTP/HTTPS). Prefer HTTPS.
+6. Configure HTTPS
+   - Use IIS or reverse proxy to terminate TLS, or configure Kestrel with a cert. Prefer internal cert from AD CA.
+7. CORS / same-origin
+   - If SPA is served from same host+port as backend, CORS not needed.
+   - If you host separately, allow the SPA origin in backend CORS policy.
+8. SPA routing rewrite (important)
+   - If your router uses history mode, configure fallback so unknown paths return index.html:
+     - IIS: add URL Rewrite rule (or use web.config produced by Vite).
+     - nginx: try_files $uri /index.html;
+     - Kestrel: middleware to rewrite to index.html for non-API requests.
+9. Health & logging
+   - Ensure static files are accessible; enable Serilog logs (already configured).
+   - Add a small health endpoint on backend and a lightweight status page.
+10. Security & production hygiene
+   - Remove dev-only settings, disable file listing, set caching headers for static assets, enable CSP, enable HTTPS, run under least privilege service account, limit who can access DB files.
+
+Minimal checklist to run now
+- Set VITE_API_BASE_URL appropriately if serving from a different host.
+- npm run build
+- Copy dist → E:\MISCMFactoryService\backend\wwwroot
+- Ensure app.UseStaticFiles/UseDefaultFiles and SPA fallback exist
+- Restart backend Windows Service
+- Add intranet DNS + firewall rule for HTTP(S)
+
+If you want, I can:
+- Add app.UseDefaultFiles() / app.UseStaticFiles() + SPA fallback middleware to Program.cs.
+- Create a PowerShell deploy script that builds the frontend, copies dist to the backend publish/wwwroot and restarts the service.
+- Provide a sample IIS web.config or URL rewrite rule for SPA fallback.
+
+Which of the above would you like me to implement next?

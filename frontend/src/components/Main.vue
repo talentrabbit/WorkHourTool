@@ -20,6 +20,24 @@
         <span class="icon">🧰</span>
         <span class="link-text">WorkHour Maintenance</span>
       </router-link>
+
+      <!-- New: Register Product -->
+      <router-link v-if="isAdmin" to="/product-register" class="entry-link attention">
+        <span class="icon">📦</span>
+        <span class="link-text">Register Product</span>
+      </router-link>
+
+      <!-- New: NCM Time -->
+      <router-link v-if="isProcess || isAdmin" to="/ncm" class="entry-link attention">
+        <span class="icon">🧾</span>
+        <span class="link-text">NCM Time</span>
+      </router-link>
+
+      <!-- New: KanBan (in construction) -->
+      <router-link to="/kanban" class="entry-link attention">
+        <span class="icon">📋</span>
+        <span class="link-text">KanBan</span>
+      </router-link>
     </div>
   </div>
 </template>
@@ -31,6 +49,7 @@ const roleVal = computed(() => (typeof userRole === 'object' && 'value' in userR
 const isWorker = computed(() => roleVal.value.toLowerCase() === 'worker')
 const isManager = computed(() => roleVal.value.toLowerCase() === 'productionmanager')
 const isAdmin = computed(() => roleVal.value.toLowerCase() === 'administrator')
+const isProcess = computed(() => { const r = roleVal.value.toLowerCase(); return r === 'process' || r === 'processengineer' })
 </script>
 
 <style scoped>
@@ -75,16 +94,19 @@ const isAdmin = computed(() => roleVal.value.toLowerCase() === 'administrator')
   text-align: center;
   max-width: 400px;
 }
+  /* Make entry links wrap into multiple rows when there are many visible buttons */
   .entry-links {
     display: flex;
-    gap: 4vw;
+    flex-wrap: wrap; /* allow wrapping to next line */
+    gap: 1.5rem; /* consistent spacing between items */
     margin-top: 3vw;
     justify-content: center;
-    width: 60vw;
+    width: 100%;
     max-width: 1200px;
+    padding: 0 1rem;
   }
   .entry-link {
-    width: 22vw;
+    flex: 1 1 260px; /* grow/shrink, prefer ~260px width */
     min-width: 220px;
     max-width: 340px;
     height: 70px;

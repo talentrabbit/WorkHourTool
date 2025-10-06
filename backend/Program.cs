@@ -9,6 +9,54 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 
+// Parse optional port from command-line or environment and set ASPNETCORE_URLS before building the host
+// Supported: --port=5080, --port 5080, --aspnetcore-port=5080, -p 5080, port=5080
+var _cmdArgs = Environment.GetCommandLineArgs();
+int? _parsedPort = null;
+for (int _i = 0; _i < _cmdArgs.Length; _i++)
+{
+    var _a = _cmdArgs[_i] ?? string.Empty;
+    if (_a.StartsWith("--port=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(7), out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.Equals("--port", StringComparison.OrdinalIgnoreCase) && _i + 1 < _cmdArgs.Length)
+    {
+        if (int.TryParse(_cmdArgs[_i + 1], out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.StartsWith("--aspnetcore-port=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(18), out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.StartsWith("-p=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(3), out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.Equals("-p", StringComparison.OrdinalIgnoreCase) && _i + 1 < _cmdArgs.Length)
+    {
+        if (int.TryParse(_cmdArgs[_i + 1], out var _v)) { _parsedPort = _v; break; }
+    }
+    // legacy style key=value
+    if (_a.StartsWith("port=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(5), out var _v)) { _parsedPort = _v; break; }
+    }
+}
+
+// Check environment fallbacks if not present on command-line
+if (!_parsedPort.HasValue)
+{
+    var _envPort = Environment.GetEnvironmentVariable("ASPNETCORE_PORT") ?? Environment.GetEnvironmentVariable("PORT");
+    if (!string.IsNullOrWhiteSpace(_envPort) && int.TryParse(_envPort, out var _ev)) _parsedPort = _ev;
+}
+
+if (_parsedPort.HasValue)
+{
+    var _urls = $"http://0.0.0.0:{_parsedPort.Value}";
+    Environment.SetEnvironmentVariable("ASPNETCORE_URLS", _urls);
+    Console.WriteLine($"[bootstrap] ASPNETCORE_URLS set to {_urls} (from port parameter)");
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure Serilog to write logs to a file with timestamps
@@ -67,7 +115,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend",
         policy => policy
             // allow the local dev origins that clients will use (localhost, 127.0.0.1 and the server hostname)
-            .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://shai571a:5173")
+            .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://shai571a:5173", "http://localhost:5080", "http://shai571a:5080")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials());
@@ -116,6 +164,22 @@ app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Ensure static files (wwwroot) are served so the built SPA can be placed in the backend publish folder
+app.UseDefaultFiles(); // enables default file mapping (index.html)
+app.UseStaticFiles();  // serve files from wwwroot
+
+// SPA fallback: for any non-API request without a file extension, serve index.html
+app.Use(async (context, next) =>
+{
+    // If the request is not for /api and does not contain a file extension, rewrite to /index.html
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) && !System.IO.Path.HasExtension(path))
+    {
+        context.Request.Path = "/index.html";
+    }
+    await next();
+});
 
 // Helper that builds the response object for current user
 static (string user, string displayName, List<string> roles) BuildUserResponse(string? effectiveUser, string? displayName, RoleConfig rolesConfig)
