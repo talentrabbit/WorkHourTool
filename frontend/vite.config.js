@@ -18,7 +18,8 @@ export default defineConfig({
     // proxy API requests to the backend so axios('/api/...') works in dev
     proxy: {
       '/api': {
-        target: 'http://localhost:5063',
+        //target: 'http://localhost:5080',  // This is production backend port
+        target: 'http://localhost:5063',  // This is dev backend port
         changeOrigin: true,
         secure: false
       }

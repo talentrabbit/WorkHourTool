@@ -1,5 +1,9 @@
 <template>
   <div class="planning-container">
+    <!-- Toast container -->
+    <div class="toast-container" aria-live="polite">
+      <div v-for="t in toasts" :key="t.id" :class="['toast', t.type]">{{ t.message }}</div>
+    </div>
     <!-- Header: Left-aligned Back button when in Non-Product view; Right-aligned Add button in Production view -->
     <div v-if="!showNonProduct" class="planning-header" style="display:flex; align-items:center; gap:1rem; justify-content:flex-end;">
       <button class="add-nonproduct-btn switch-btn" @click="openNonProductPanel" aria-label="Open Non-Product Task panel">
@@ -73,7 +77,19 @@
             <input type="time" v-model="task.endTime" />
           </div>
         </div>
-        <button @click="assignTask" class="assign-btn" :disabled="isAssignDisabled">Assign</button>
+        <div class="checkbox-row" v-if="hasWeekendRange" style="margin-top:8px;">
+          <div class="checkbox-area">
+            <input type="checkbox" id="includeWeekend" v-model="includeWeekend" />
+            <label for="includeWeekend">Include Weekend</label>
+          </div>
+        </div>
+        <div class="controls-row" style="margin-top:8px;">
+          <div></div>
+          <div class="buttons-area">
+            <button @click="assignTask" class="assign-btn" :disabled="isAssignDisabled || assigning">Assign</button>
+          </div>
+          <div></div>
+        </div>
         <div v-if="hasConflict" class="error" style="margin-top:8px;">Selected time range conflicts with an existing assignment for {{ conflictFor }}.</div>
         <div v-if="task.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
           <h4>Assignments for {{ task.workerName }}</h4>
@@ -169,9 +185,19 @@
           <input type="time" v-model="nonProductTask.endTime" />
         </div>
       </div>
-      <div style="margin-top:12px;">
-        <button @click="assignNonProductTask" class="assign-btn" :disabled="isNonProductAssignDisabled">Assign</button>
-        <button @click="closeNonProductPanel" class="cancel-btn" style="margin-left:8px;">Cancel</button>
+      <div class="checkbox-row" v-if="hasWeekendRangeNon" style="margin-top:12px;">
+        <div class="checkbox-area">
+          <input type="checkbox" id="includeWeekendNon" v-model="includeWeekendNon" />
+          <label for="includeWeekendNon">Include Weekend</label>
+        </div>
+      </div>
+      <div class="controls-row" style="margin-top:12px;">
+        <div></div>
+        <div class="buttons-area" style="display:flex; align-items:center; gap:8px;">
+          <button @click="assignNonProductTask" class="assign-btn" :disabled="isNonProductAssignDisabled || assigningNon">Assign</button>
+          <button @click="closeNonProductPanel" class="cancel-btn" style="margin-left:8px;">Cancel</button>
+        </div>
+        <div></div>
       </div>
 
       <div v-if="nonHasConflict" class="error" style="margin-top:8px;">Selected time range conflicts with an existing assignment for {{ nonConflictFor }}.</div>
@@ -245,6 +271,67 @@ const nonProductTask = ref({
   endDate: '',
   startTime: '',
   endTime: ''
+})
+
+// checkbox state: include weekends when splitting across multiple days
+const includeWeekend = ref(true)
+const includeWeekendNon = ref(true)
+
+// simple toast notifications
+const toasts = ref([])
+let toastSeq = 1
+function showToast(message, type = 'info', timeout = 3500) {
+  const id = toastSeq++
+  toasts.value.push({ id, message, type })
+  setTimeout(() => {
+    const idx = toasts.value.findIndex(t => t.id === id)
+    if (idx !== -1) toasts.value.splice(idx, 1)
+  }, timeout)
+}
+
+// in-progress flags to prevent duplicate submits
+const assigning = ref(false)
+const assigningNon = ref(false)
+
+function resetNonProductDefaults() {
+  const tomorrow = getTomorrowDateStr()
+  nonProductTask.value.startDate = tomorrow
+  nonProductTask.value.endDate = tomorrow
+  nonProductTask.value.startTime = '08:30'
+  nonProductTask.value.endTime = '17:00'
+}
+
+function resetProductDefaults() {
+  const tomorrow = getTomorrowDateStr()
+  task.value.startDate = tomorrow
+  task.value.endDate = tomorrow
+  task.value.startTime = '08:30'
+  task.value.endTime = '17:00'
+}
+
+// detect whether the selected date range spans a weekend (Sat or Sun)
+const hasWeekendRange = computed(() => {
+  if (!task.value.startDate || !task.value.endDate) return false
+  const s = new Date(task.value.startDate)
+  const e = new Date(task.value.endDate)
+  if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return false
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay()
+    if (day === 0 || day === 6) return true
+  }
+  return false
+})
+
+const hasWeekendRangeNon = computed(() => {
+  if (!nonProductTask.value.startDate || !nonProductTask.value.endDate) return false
+  const s = new Date(nonProductTask.value.startDate)
+  const e = new Date(nonProductTask.value.endDate)
+  if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return false
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay()
+    if (day === 0 || day === 6) return true
+  }
+  return false
 })
 
 const coWorkerOptions = computed(() => workerNames.value.filter(n => n !== task.value.workerName))
@@ -598,11 +685,11 @@ async function assignTask() {
   const startDt = new Date(startStr)
   const endDt = new Date(endStr)
   if (isNaN(startDt.getTime()) || isNaN(endDt.getTime()) || endDt <= startDt) {
-    alert('Please ensure start time is before end time.')
+    showToast('Please ensure start time is before end time.', 'error')
     return
   }
   if (hasConflict.value) {
-    alert(`Selected time range conflicts with existing assignment for ${conflictFor.value}.`)
+    showToast(`Selected time range conflicts with existing assignment for ${conflictFor.value}.`, 'error')
     return
   }
 
@@ -612,8 +699,14 @@ async function assignTask() {
   const lastDay = new Date(endDt.getFullYear(), endDt.getMonth(), endDt.getDate())
 
   let primaryPlanned = 0
+  if (assigning.value) return
+  assigning.value = true
+
   // iterate each day and submit one record per day
   for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+    // optionally skip weekends
+    const weekday = d.getDay()
+    if (!includeWeekend.value && (weekday === 0 || weekday === 6)) continue
     // determine day-specific start/end
     const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
     const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
@@ -651,6 +744,9 @@ async function assignTask() {
   if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
     coPlanned = 0
     for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+      // optionally skip weekends
+      const weekday = d.getDay()
+      if (!includeWeekend.value && (weekday === 0 || weekday === 6)) continue
       const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
       const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
 
@@ -684,11 +780,14 @@ async function assignTask() {
   let msg = `Task assigned from ${task.value.startDate} to ${task.value.endDate}. Planned hours total - ${task.value.workerName}: ${primaryPlanned.toFixed(2)}.`
   if (coPlanned !== null) msg += `; ${task.value.coWorkerName}: ${coPlanned.toFixed(2)}`
 
-  alert(msg)
+  showToast(msg, 'success')
   if (task.value.workerName) await updateWorkerAssignments()
   if (task.value.coWorkerName && task.value.coWorkerName !== task.value.workerName) {
     await updateCoWorkerAssignments()
   }
+  // reset to defaults
+  resetProductDefaults()
+  assigning.value = false
 }
 
 const isAssignDisabled = computed(() => {
@@ -743,75 +842,152 @@ function closeNonProductPanel() {
 async function assignNonProductTask() {
   const r = currentRangeNon()
   if (!r) {
-    alert('Please ensure start time is before end time.')
+    showToast('Please ensure start time is before end time.', 'error')
     return
   }
-  // compute hours with lunch deduction
-  const hours = computeHoursMinusLunch(r.start, r.end)
+  if (nonHasConflict.value) {
+    showToast(`Selected time range conflicts with existing assignment for ${nonConflictFor.value}.`, 'error')
+    return
+  }
 
-  try {
-    const startStr = `${nonProductTask.value.startDate}T${nonProductTask.value.startTime}:00`
-    const endStr = `${nonProductTask.value.endDate}T${nonProductTask.value.endTime}:00`
+  const startDt = r.start
+  const endDt = r.end
+  if (isNaN(startDt.getTime()) || isNaN(endDt.getTime()) || endDt <= startDt) {
+    showToast('Please ensure start time is before end time.', 'error')
+    return
+  }
 
-    // Primary (assigned) worker
-    let plannedPrimary = hours
+  function pad(n){ return String(n).padStart(2,'0') }
+  const firstDay = new Date(startDt.getFullYear(), startDt.getMonth(), startDt.getDate())
+  const lastDay = new Date(endDt.getFullYear(), endDt.getMonth(), endDt.getDate())
+
+  if (assigningNon.value) return
+  assigningNon.value = true
+
+  let plannedPrimaryTotal = 0
+  // Primary worker: create one record per calendar day
+  for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+    // optionally skip weekends
+    const weekday = d.getDay()
+    if (!includeWeekendNon.value && (weekday === 0 || weekday === 6)) continue
+    const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
+    const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
+
+    const dayStart = isFirst
+      ? startDt
+      : new Date(
+          d.getFullYear(),
+          d.getMonth(),
+          d.getDate(),
+          parseInt(nonProductTask.value.startTime.split(':')[0] || 0),
+          parseInt(nonProductTask.value.startTime.split(':')[1] || 0),
+          0
+        )
+    const dayEnd = isLast
+      ? endDt
+      : new Date(
+          d.getFullYear(),
+          d.getMonth(),
+          d.getDate(),
+          parseInt(nonProductTask.value.endTime.split(':')[0] || 0),
+          parseInt(nonProductTask.value.endTime.split(':')[1] || 0),
+          0
+        )
+
+    if (isNaN(dayStart.getTime()) || isNaN(dayEnd.getTime()) || dayEnd <= dayStart) continue
+
+    const dayDateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+    const sStr = `${dayDateStr}T${pad(dayStart.getHours())}:${pad(dayStart.getMinutes())}:00`
+    const eStr = `${dayDateStr}T${pad(dayEnd.getHours())}:${pad(dayEnd.getMinutes())}:00`
+
+    const hoursForDay = computeHoursMinusLunch(dayStart, dayEnd)
     try {
       const res = await axios.post('/api/WorkHours/submit-work-hours', {
-        SerialNo: '999999', // Give 999999 SerialNo as Non-Product Task (DB should contain this placeholder product)
+        SerialNo: '999999', // Non-Product placeholder
         WorkerName: nonProductTask.value.workerName,
         ProcessName: nonProductTask.value.process,
-        Hours: hours,
-        StartTime: startStr,
-        EndTime: endStr
+        Hours: hoursForDay,
+        StartTime: sStr,
+        EndTime: eStr
       })
-      plannedPrimary = Number(res.data?.plannedHours ?? hours)
-    } catch (errPrimary) {
-      console.error('Failed to submit primary non-product assignment', errPrimary)
+      plannedPrimaryTotal += Number(res.data?.plannedHours ?? hoursForDay)
+    } catch (e) {
+      console.error('Failed to submit primary non-product assignment for day', dayDateStr, e)
     }
+  }
 
-    // Optional co-worker: submit a separate WorkHour record for the co-worker
-    let plannedCo = null
-    if (nonProductTask.value.coWorkerName && nonProductTask.value.coWorkerName !== nonProductTask.value.workerName) {
+  // Optional co-worker: submit one record per day as well
+  let plannedCoTotal = null
+  if (nonProductTask.value.coWorkerName && nonProductTask.value.coWorkerName !== nonProductTask.value.workerName) {
+    plannedCoTotal = 0
+    for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+      // optionally skip weekends
+      const weekday = d.getDay()
+      if (!includeWeekendNon.value && (weekday === 0 || weekday === 6)) continue
+      const isFirst = d.getFullYear() === startDt.getFullYear() && d.getMonth() === startDt.getMonth() && d.getDate() === startDt.getDate()
+      const isLast = d.getFullYear() === endDt.getFullYear() && d.getMonth() === endDt.getMonth() && d.getDate() === endDt.getDate()
+
+      const dayStart = isFirst
+        ? startDt
+        : new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate(),
+            parseInt(nonProductTask.value.startTime.split(':')[0] || 0),
+            parseInt(nonProductTask.value.startTime.split(':')[1] || 0),
+            0
+          )
+      const dayEnd = isLast
+        ? endDt
+        : new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate(),
+            parseInt(nonProductTask.value.endTime.split(':')[0] || 0),
+            parseInt(nonProductTask.value.endTime.split(':')[1] || 0),
+            0
+          )
+
+      if (isNaN(dayStart.getTime()) || isNaN(dayEnd.getTime()) || dayEnd <= dayStart) continue
+
+      const dayDateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+      const sStr = `${dayDateStr}T${pad(dayStart.getHours())}:${pad(dayStart.getMinutes())}:00`
+      const eStr = `${dayDateStr}T${pad(dayEnd.getHours())}:${pad(dayEnd.getMinutes())}:00`
+
+      const hoursForDay = computeHoursMinusLunch(dayStart, dayEnd)
       try {
         const resCo = await axios.post('/api/WorkHours/submit-work-hours', {
           SerialNo: '999999',
           WorkerName: nonProductTask.value.coWorkerName,
           ProcessName: nonProductTask.value.process,
-          Hours: hours,
-          StartTime: startStr,
-          EndTime: endStr
+          Hours: hoursForDay,
+          StartTime: sStr,
+          EndTime: eStr
         })
-        plannedCo = Number(resCo.data?.plannedHours ?? hours)
-      } catch (errCo) {
-        console.error('Failed to submit co-worker non-product assignment', errCo)
+        plannedCoTotal += Number(resCo.data?.plannedHours ?? hoursForDay)
+      } catch (e) {
+        console.error('Failed to submit co-worker non-product assignment for day', dayDateStr, e)
       }
     }
-
-    // Build message including both planned hours
-    let msg = `Non-Product Task assigned on ${nonProductTask.value.startDate}. Planned hours - ${nonProductTask.value.workerName}: ${plannedPrimary.toFixed(2)}.`
-    if (plannedCo !== null) msg += `; ${nonProductTask.value.coWorkerName}: ${plannedCo.toFixed(2)}`
-
-    alert(msg)
-
-    // refresh lists and reset form
-    //showNonProduct.value = false
-    if (nonProductTask.value.workerName) await updateWorkerAssignments()
-    if (plannedCo !== null && nonProductTask.value.coWorkerName) {
-      // refresh co-worker assignments as well
-      const prevCo = nonProductTask.value.coWorkerName
-      nonProductTask.value.coWorkerName = ''
-      nonProductTask.value.coWorkerName = prevCo
-      // optional: call updateCoWorkerAssignments to refresh immediately
-      await updateCoWorkerAssignments()
-    }
-
-    nonProductTask.value.workerName = ''
-    nonProductTask.value.process = ''
-    nonProductTask.value.coWorkerName = ''
-  } catch (e) {
-    console.error('Failed to submit non-product task', e)
-    alert('Failed to assign non-product task: ' + (e.response?.data?.message || e.message))
   }
+
+  // Build message including total planned hours and date range
+  let msg = `Non-Product Task assigned from ${nonProductTask.value.startDate} to ${nonProductTask.value.endDate}. Planned hours - ${nonProductTask.value.workerName}: ${plannedPrimaryTotal.toFixed(2)}`
+  if (plannedCoTotal !== null) msg += `; ${nonProductTask.value.coWorkerName}: ${plannedCoTotal.toFixed(2)}`
+
+  showToast(msg, 'success')
+
+  // Refresh lists for non-product view and reset lightweight fields
+  if (nonProductTask.value.workerName) await updateNonProductWorkerAssignments()
+  if (plannedCoTotal !== null && nonProductTask.value.coWorkerName && nonProductTask.value.coWorkerName !== nonProductTask.value.workerName) {
+    await updateNonProductCoWorkerAssignments()
+  }
+  // reset simple fields and defaults
+  resetNonProductDefaults()
+  nonProductTask.value.workerName = ''
+  nonProductTask.value.process = ''
+  nonProductTask.value.coWorkerName = ''
+  assigningNon.value = false
 }
 </script>
 
@@ -918,4 +1094,29 @@ async function assignNonProductTask() {
   border-color: #F5D3B0;
   box-shadow: inset 0 1px 2px rgba(0,0,0,0.1), 0 4px 10px rgba(236,102,2,0.12);
 }
+
+/* Controls row: three-column grid so buttons can be centered while checkbox sits to the left */
+.controls-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.checkbox-area { justify-self: start; padding-left: 8px; }
+.checkbox-row { display:flex; justify-content:flex-start; }
+.buttons-area { justify-self: center; }
+.toast-container { position: fixed; top: 12px; right: 12px; z-index: 9999; display:flex; flex-direction:column; gap:8px; }
+.toast { padding: 0.6rem 0.9rem; border-radius: 8px; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.toast.info { background: #2b6cb0; }
+.toast.success { background: #2f855a; }
+.toast.error { background: #c53030; }
+
+/* Make Assign and Cancel consistent size inside controls row */
+.controls-row .buttons-area .assign-btn,
+.controls-row .buttons-area .cancel-btn {
+  min-width: 120px;
+  padding: 0.6rem 1rem;
+}
+.controls-row .buttons-area .assign-btn { margin-top: 0; }
+.controls-row .buttons-area .cancel-btn { background: #ffffff; border: 1px solid #d1d5db; color: #333; }
 </style>
