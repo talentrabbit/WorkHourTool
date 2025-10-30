@@ -15,11 +15,11 @@
     <div class="portal-body">
       <aside  class="portal-nav">
         <nav>
-          <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Production Planning</router-link>
+          <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Planning</router-link>
           <router-link v-if="isAdmin" to="/product-register" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Register Product</router-link>
           <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
           <router-link v-if="isProcess || isAdmin" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
-          <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">WorkHour Maintenance</router-link>
+          <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Maintenance</router-link>
           <router-link v-if="isAdmin || isManager" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
         </nav>
       </aside>
@@ -184,25 +184,38 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* Root: fixed to viewport 16:9, scalable */
+/* Root: fill width, allow page-level scrolling (no inner scrollbars) */
 .portal {
   width: 100vw;
-  max-width: 1366px; /* constrain to target desktop width */
-  height: 100vh;
-  margin: 0; /* align to left of screen */
+  max-width: 1920px; /* fill full screen width */
+  min-height: 100vh; /* at least viewport height; grows with content */
+  height: auto; /* allow natural growth so page scroll is used */
+  margin: 0% auto;
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible; /* don't trap scroll; let body handle it */
 }
 
 /* Header */
-.portal-header { height: 72px; min-height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: #FFFFFF; border-bottom: 1px solid #F2C7A6; box-shadow: 0 2px 8px rgba(236,102,2,0.08); }
+.portal-header { 
+  /* header height clamps up to 120px max */
+  --header-h: clamp(64px, 8vh, 120px);
+  height: var(--header-h);
+  min-height: var(--header-h);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: #FFFFFF; border-bottom: 1px solid #F2C7A6; box-shadow: 0 2px 8px rgba(236,102,2,0.08);
+}
 .header-left { display: flex; align-items: center; gap: 12px; }
-.home-btn { width: 64px; height: 64px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 28px; }
-.header-logo { height: 72px; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(236,102,2,0.25)); }
-.header-title { font-size: 1.25rem; font-weight: 800; color: #EC6602; letter-spacing: 0.02em; }
+.home-btn { width: var(--header-h); height: var(--header-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 28px; }
+.header-logo { height: var(--header-h); max-height: 120px; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(236,102,2,0.25)); }
+.header-title {
+  flex: 1; /* let title take remaining space between left/right */
+  text-align: center;
+  font-size: clamp(16px, 2vw, 28px); /* responsive, capped */
+  font-weight: 800; color: #EC6602; letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* prevent wrapping */
+}
 .header-right { display: flex; align-items: center; gap: 16px; }
 .user-info { color: #82451F; font-weight: 600; background: #FFF3E8; border: 1px solid #F2C7A6; padding: 6px 10px; border-radius: 8px; }
 .signout-btn { margin-left: 12px; background: transparent; border: 1px solid #E6C9B0; color: #82451F; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
@@ -211,7 +224,7 @@ onMounted(async () => {
 
 /* Body */
 .portal-body { flex: 1; display: flex; min-height: 0; width: 100%; position: relative; }
-.portal-nav { width: 220px; min-width: 220px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 16px 10px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
+.portal-nav { width: 200px; min-width: 200px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 14px 8px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
 .portal-nav nav { display: flex; flex-direction: column; gap: 8px; }
 .nav-link { display: block; padding: 10px 12px; color: #82451F; text-decoration: none; border-radius: 8px; background: #FFE6D3; box-shadow: 0 1px 4px rgba(236,102,2,0.08); font-weight: 600; }
 .nav-link:hover { transform: translateY(-1px); background: #FFD9BB; }
@@ -219,7 +232,7 @@ onMounted(async () => {
 .nav-link.dimmed, .home-btn.dimmed { opacity: 0.45; pointer-events: none; }
 
 /* Main Content */
-.portal-content { flex: 1; min-width: 0; padding: 24px; overflow: auto; }
+.portal-content { flex: 1; min-width: 0; padding: 0px; overflow: visible; }
 
 /* Footer */
 .portal-footer { height: 40px; min-height: 40px; background: #FFFFFF; border-top: 1px solid #F2C7A6; display: flex; align-items: center; justify-content: center; color: #82451F; font-size: 0.9rem; }
@@ -235,9 +248,14 @@ onMounted(async () => {
 .btn:hover { opacity: 0.95 }
 
 /* Responsive tweaks */
+@media (max-width: 1600px) {
+  .portal { padding: 0 8px; }
+  .portal-nav { width: 180px; min-width: 180px; }
+}
+
 @media (max-width: 1366px) {
   .portal { padding: 0 8px; }
-  .portal-nav { width: 220px; }
+  .portal-nav { width: 170px; min-width: 170px; }
   .header-logo { height: 56px; }
   .logon-modal { width: 360px }
 }

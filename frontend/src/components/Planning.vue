@@ -1,5 +1,5 @@
 <template>
-  <div class="planning-container">
+  <div class="planning-container" >
     <!-- Toast container -->
     <div class="toast-container" aria-live="polite">
       <div v-for="t in toasts" :key="t.id" :class="['toast', t.type]">{{ t.message }}</div>
@@ -93,7 +93,7 @@
         <div v-if="hasConflict" class="error" style="margin-top:8px;">Selected time range conflicts with an existing assignment for {{ conflictFor }}.</div>
         <div v-if="task.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
           <h4>Assignments for {{ task.workerName }}</h4>
-          <vxe-table :data="existingAssignments" border stripe round class="modern-vxe-table">
+          <vxe-table :data="existingAssignments" border stripe round class="modern-vxe-table" :scroll-y="{ enabled: false }">
             <vxe-column field="serialNo" title="SerialNo" width="120" />
             <vxe-column field="systemType" title="SystemType" width="140" />
             <vxe-column field="processName" title="Process" width="160" />
@@ -105,7 +105,7 @@
         <!-- New: show co-worker assignments when selected -->
         <div v-if="task.coWorkerName && task.coWorkerName !== task.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
           <h4>Assignments for {{ task.coWorkerName }}</h4>
-          <vxe-table :data="coWorkerAssignments" border stripe round class="modern-vxe-table">
+          <vxe-table :data="coWorkerAssignments" border stripe round class="modern-vxe-table" :scroll-y="{ enabled: false }">
             <vxe-column field="serialNo" title="SerialNo" width="120" />
             <vxe-column field="systemType" title="SystemType" width="140" />
             <vxe-column field="processName" title="Process" width="160" />
@@ -126,7 +126,7 @@
       <div v-else>
         <div v-for="group in groupedProducts" :key="group.systemType" class="system-group">
           <div class="group-title">{{ group.systemType || 'Unknown' }}</div>
-          <vxe-table :data="group.rows" border stripe round class="modern-vxe-table">
+          <vxe-table :data="group.rows" border stripe round class="modern-vxe-table" :scroll-y="{ enabled: false }">
             <vxe-column field="serialNo" title="SerialNo" width="120">
               <template #default="{ row }">
                 <span class="serial-link" @click="openProductFromSerial(row.serialNo)">{{ row.serialNo }}</span>
@@ -204,7 +204,7 @@
 
       <div v-if="nonProductTask.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
         <h4>Assignments for {{ nonProductTask.workerName }}</h4>
-        <vxe-table :data="nonProductExistingAssignments" border stripe round class="modern-vxe-table">
+  <vxe-table :data="nonProductExistingAssignments" border stripe round class="modern-vxe-table" :scroll-y="{ enabled: false }">
           <vxe-column field="serialNo" title="SerialNo" width="120" />
           <vxe-column field="systemType" title="SystemType" width="140" />
           <vxe-column field="processName" title="Process" width="160" />
@@ -216,7 +216,7 @@
 
       <div v-if="nonProductTask.coWorkerName && nonProductTask.coWorkerName !== nonProductTask.workerName" class="existing-assignments modern-table" style="margin-top: 1vw;">
         <h4>Assignments for {{ nonProductTask.coWorkerName }}</h4>
-        <vxe-table :data="nonCoWorkerAssignments" border stripe round class="modern-vxe-table">
+  <vxe-table :data="nonCoWorkerAssignments" border stripe round class="modern-vxe-table" :scroll-y="{ enabled: false }">
           <vxe-column field="serialNo" title="SerialNo" width="120" />
           <vxe-column field="systemType" title="SystemType" width="140" />
           <vxe-column field="processName" title="Process" width="160" />
@@ -993,10 +993,9 @@ async function assignNonProductTask() {
 
 <style scoped>
 .planning-container {
-  max-width: 900px;
-  width: 70vw;
+  max-width: 96%; width: 75vw; 
   margin: 4vw auto;
-  padding: 2.5vw;
+  padding: 0.5vw;
   background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);
   border-radius: 18px;
   box-shadow: 0 6px 28px rgba(236,102,2,0.12);
