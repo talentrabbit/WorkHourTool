@@ -135,7 +135,7 @@ async function submit() {
 </script>
 
 <style scoped>
-.product-register { max-width: 760px; margin: 1em auto; padding: 1.2em; background: #fff; border: 1px solid #f2c7a6; border-radius: 8px; }
+.product-register {   max-width: 90%; width: 75vw;   margin: 1em auto; padding: 1.2em; background: #fff; border: 1px solid #f2c7a6; border-radius: 8px; }
 .register-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; align-items: start; }
 label { font-weight: 700; color: #5a3b27; display:block; margin-bottom:0.2rem }
 .register-grid input, .register-grid select { width:100%; padding:0.4rem; border:1px solid #e6c9b0; border-radius:6px; box-sizing: border-box; font-size:0.95rem }

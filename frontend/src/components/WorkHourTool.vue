@@ -318,7 +318,7 @@ function handleStartWork(payload) {
     height: auto;
     transition: opacity 0.5s ease-in-out;
   }
-.nav-layout { display: flex; flex-direction: column; min-height: 100vh; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
+.nav-layout { max-width: 96%; width: 75vw; display: flex; flex-direction: column; min-height: 100vh; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
 .nav-header { display: flex; align-items: center; padding: 1em 2em 0.5em 1em; }
 .company-logo { display:none; }
 .hero-section h1 { margin: 0; font-size: 2.5em; color: #EC6602; }

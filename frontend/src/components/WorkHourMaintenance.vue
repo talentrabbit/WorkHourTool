@@ -25,10 +25,15 @@
             <option value="">All Workers</option>
             <option v-for="w in workerNames" :key="w" :value="w">{{ w }}</option>
           </select>
-          <select v-model="whFilter.processName" class="filter-input">
-            <option value="">All Processes</option>
-            <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
-          </select>
+          <input
+            v-model="whFilter.processName"
+            list="wh-process-names"
+            class="filter-input"
+            placeholder="All Processes (type to search)"
+          />
+          <datalist id="wh-process-names">
+            <option v-for="p in processNames" :key="p" :value="p"></option>
+          </datalist>
           <select v-model="whFilter.state" class="filter-input">
             <option value="">All States</option>
             <option v-for="s in workHourStates" :key="s" :value="s">{{ s }}</option>
@@ -40,8 +45,8 @@
 
         <vxe-table :data="filteredWorkHours" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChange('wh', $event)" @checkbox-all="onCheckChange('wh', $event)">
           <vxe-column type="checkbox" width="50" />
-          <vxe-column field="id" title="ID" width="70" />
-          <vxe-column field="serialNo" title="SerialNo" width="90" />
+          <vxe-column field="id" title="ID" width="50" />
+          <vxe-column field="serialNo" title="SerialNo" width="80" />
           <vxe-column field="systemType" title="SystemType" width="140" />
           <vxe-column field="state" title="State" width="90" />
 
@@ -51,19 +56,24 @@
                 <option v-for="w in workerNames" :key="w" :value="w">{{ w }}</option>
               </select>
             </template>
+          </vxe-column>          
+
+          <vxe-column field="processName" title="ProcessName" width="200">
+            <template #default="{ row }">
+              <template v-if="String(row.serialNo) === '999999'">
+                <input type="text" v-model="row.processName" class="cell-input" @input="() => markChanged('wh', row.id)" />
+              </template>
+              <template v-else>
+                <select v-model="row.processName" class="cell-input" @change="() => markChanged('wh', row.id)">
+                  <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
+                </select>
+              </template>
+            </template>
           </vxe-column>
 
           <vxe-column field="plannedHours" title="PlannedHours" width="120">
             <template #default="{ row }">
               <input type="number" step="0.1" min="0" v-model.number="row.plannedHours" class="cell-input eh-input" @input="() => markChanged('wh', row.id)" />
-            </template>
-          </vxe-column>
-
-          <vxe-column field="processName" title="ProcessName" width="200">
-            <template #default="{ row }">
-              <select v-model="row.processName" class="cell-input" @change="() => markChanged('wh', row.id)">
-                <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
-              </select>
             </template>
           </vxe-column>
 
@@ -371,7 +381,7 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-.maintenance-container{ padding: 12px }
+.maintenance-container{ max-width: 100%; width: 75vw;  padding: 12px }
 .collapsible{ margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px }
 .collapsible-header{ display:flex; justify-content:space-between; padding:8px; background:#f7f7f7; cursor:pointer }
 .collapsible-body{ padding:12px }
