@@ -239,22 +239,42 @@ function formatDateTime(dt){
   try { return new Date(dt).toLocaleString() } catch { return String(dt) }
 }
 
-function onStartChange(row, value, actual=false){
-  const iso = new Date(value)
-  if (!isNaN(iso)){
-    // store in startTime or startTimeActual depending on actual flag
-    if (actual) row.startTimeActual = iso.toISOString()
-    else row.startTime = iso.toISOString()
+function computeEffectiveHours(row){
+  // Prefer actual times if present, otherwise use planned start/end
+  const s = row.startTimeActual || row.startTime
+  const e = row.endTimeActual || row.endTime
+  if (!s || !e) return
+  const sd = new Date(s)
+  const ed = new Date(e)
+  if (isNaN(sd) || isNaN(ed)) return
+  const hours = Math.round(((ed - sd) / 3600000) * 100) / 100
+  // only update if different to avoid noisy marks
+  if (row.effectiveHours !== hours) {
+    row.effectiveHours = hours
     markChanged('wh', row.id)
   }
 }
 
+function onStartChange(row, value, actual=false){
+  // value is in local 'YYYY-MM-DDTHH:MM' from datetime-local input
+  if (value && value.length >= 16) {
+    const localWithSeconds = value + ':00'
+    if (actual) row.startTimeActual = localWithSeconds
+    else row.startTime = localWithSeconds
+    // Recompute effective hours when actual times change
+    if (actual) computeEffectiveHours(row)
+    else markChanged('wh', row.id)
+  }
+}
+
 function onEndChange(row, value, actual=false){
-  const iso = new Date(value)
-  if (!isNaN(iso)){
-    if (actual) row.endTimeActual = iso.toISOString()
-    else row.endTime = iso.toISOString()
-    markChanged('wh', row.id)
+  // value is in local 'YYYY-MM-DDTHH:MM' from datetime-local input
+  if (value && value.length >= 16) {
+    const localWithSeconds = value + ':00'
+    if (actual) row.endTimeActual = localWithSeconds
+    else row.endTime = localWithSeconds
+    if (actual) computeEffectiveHours(row)
+    else markChanged('wh', row.id)
   }
 }
 
