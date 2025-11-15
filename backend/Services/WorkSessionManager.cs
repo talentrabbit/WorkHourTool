@@ -7,6 +7,7 @@ using backend.DbModel;
 using backend.Data;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace backend.Services
 {
@@ -17,13 +18,15 @@ namespace backend.Services
     {
         private readonly ConcurrentDictionary<string, ManagedSession> _sessions = new();
         private readonly ILogger<WorkSessionManager> _logger;
+        private readonly IServiceScopeFactory _scopeFactory;
 
         // How often (seconds) to persist session state to DB from the timer
         private const int SAVE_INTERVAL_SECONDS = 15;
 
-        public WorkSessionManager(ILogger<WorkSessionManager> logger)
+        public WorkSessionManager(ILogger<WorkSessionManager> logger, IServiceScopeFactory scopeFactory)
         {
             _logger = logger;
+            _scopeFactory = scopeFactory;
             // Log startup so we can verify messages appear in the same Serilog file as controllers
             _logger.LogInformation("WorkSessionManager initialized");
         }
@@ -54,8 +57,9 @@ namespace backend.Services
         public ManagedSessionInfo StartOrResume(ManagerStartRequest req)
         {
             // Try to find an open session in DB first (by WorkHourId if provided)
-            using (var db = new AppDbContext())
+            using (var scope = _scopeFactory.CreateScope())
             {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 WorkSession session = null;
                 if (req.WorkHourId.HasValue)
                 {
@@ -118,8 +122,9 @@ namespace backend.Services
             }
 
             // If not in memory, try to load from DB and create managed session
-            using (var db = new AppDbContext())
+            using (var scope = _scopeFactory.CreateScope())
             {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
                 if (session == null) return null;
                 managed = _sessions.GetOrAdd(session.SessionId, sid => new ManagedSession(session, this, _logger));
@@ -133,8 +138,9 @@ namespace backend.Services
         {
             if (string.IsNullOrWhiteSpace(sessionId)) return null;
             if (_sessions.TryGetValue(sessionId, out var m)) return m.Session;
-            using (var db = new AppDbContext())
+            using (var scope = _scopeFactory.CreateScope())
             {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 return db.WorkSessions.AsNoTracking().FirstOrDefault(s => s.SessionId == sessionId);
             }
         }
@@ -146,8 +152,9 @@ namespace backend.Services
             if (managed != null) return managed.Session;
 
             // fallback to DB
-            using (var db = new AppDbContext())
+            using (var scope = _scopeFactory.CreateScope())
             {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 return db.WorkSessions.AsNoTracking()
                     .Where(s => s.WorkHourId == workHourId)
                     .OrderByDescending(s => s.LastHeartbeat)
@@ -176,8 +183,9 @@ namespace backend.Services
             }
 
             // Not in memory: try to mark completed in DB
-            using (var db = new AppDbContext())
+            using (var scope = _scopeFactory.CreateScope())
             {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == sessionId);
                 if (session == null) return false;
                 if (finalElapsedSeconds.HasValue && finalElapsedSeconds.Value > session.ElapsedSeconds) session.ElapsedSeconds = finalElapsedSeconds.Value;
@@ -213,7 +221,7 @@ namespace backend.Services
                             foreach (var el in ncmRows.EnumerateArray())
                             {
                                 var pe = el.TryGetProperty("processEngineer", out var peEl) && peEl.ValueKind == System.Text.Json.JsonValueKind.String ? peEl.GetString() : null;
-                                var na = el.TryGetProperty("ncmAction", out var naEl) && naEl.ValueKind == System.Text.Json.JsonValueKind.String ? naEl.GetString() : null;
+                                var callingContent = el.TryGetProperty("callingContent", out var ccEl) && ccEl.ValueKind == System.Text.Json.JsonValueKind.String ? ccEl.GetString() : null;
                                 double nh = 0;
                                 if (el.TryGetProperty("ncmHours", out var nhEl) && nhEl.ValueKind == System.Text.Json.JsonValueKind.Number) nh = nhEl.GetDouble();
 
@@ -226,7 +234,7 @@ namespace backend.Services
                                     NcmHours = nh,
                                     ProductId = productId,
                                     State = "Notified",
-                                    NcmAction = na
+                                    CallingContent = callingContent
                                 };
                                 db.NcmTimes.Add(ncm);
                             }
@@ -247,7 +255,8 @@ namespace backend.Services
         {
             try
             {
-                using var db = new AppDbContext();
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var existing = db.WorkSessions.FirstOrDefault(s => s.SessionId == session.SessionId);
                 if (existing != null)
                 {
@@ -394,16 +403,12 @@ namespace backend.Services
 
                 try
                 {
-                    using var db = new AppDbContext();
-                    var sessionEntity = db.WorkSessions.FirstOrDefault(s => s.SessionId == Session.SessionId);
-                    if (sessionEntity != null)
-                    {
-                        sessionEntity.LastHeartbeat = Session.LastHeartbeat;
-                        sessionEntity.ElapsedSeconds = Session.ElapsedSeconds;
-                        sessionEntity.ActiveClock = Session.ActiveClock;
-                        sessionEntity.MetadataJson = Session.MetadataJson;
-                        sessionEntity.State = Session.State;
-                    }
+                    using var scope = _owner._scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                    // Note: WorkSession snapshot has already been persisted above by PersistSnapshot(Session).
+                    // The following block intentionally avoids repeating WorkSession field updates and
+                    // focuses only on WorkHour and NCM persistence.
 
                     if (Session.WorkHourId.HasValue)
                     {
@@ -434,7 +439,7 @@ namespace backend.Services
                                 foreach (var el in ncmRows.EnumerateArray())
                                 {
                                     var pe = el.TryGetProperty("processEngineer", out var peEl) && peEl.ValueKind == System.Text.Json.JsonValueKind.String ? peEl.GetString() : null;
-                                    var na = el.TryGetProperty("ncmAction", out var naEl) && naEl.ValueKind == System.Text.Json.JsonValueKind.String ? naEl.GetString() : null;
+                                    var callingContent = el.TryGetProperty("callingContent", out var ccEl) && ccEl.ValueKind == System.Text.Json.JsonValueKind.String ? ccEl.GetString() : null;
                                     double nh = 0;
                                     if (el.TryGetProperty("ncmHours", out var nhEl) && nhEl.ValueKind == System.Text.Json.JsonValueKind.Number) nh = nhEl.GetDouble();
 
@@ -447,7 +452,7 @@ namespace backend.Services
                                         NcmHours = nh,
                                         ProductId = productId,
                                         State = "Notified",
-                                        NcmAction = na
+                                        CallingContent = callingContent
                                     };
                                     db.NcmTimes.Add(ncm);
                                 }
@@ -488,8 +493,9 @@ namespace backend.Services
                 }
 
                 // Remove any DB record for the session
-                using (var db = new AppDbContext())
+                using (var scope = _scopeFactory.CreateScope())
                 {
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     var s = db.WorkSessions.FirstOrDefault(x => x.SessionId == sessionId);
                     if (s != null)
                     {
@@ -519,8 +525,9 @@ namespace backend.Services
                 }
 
                 // fallback: delete DB row(s) matching workHourId
-                using (var db = new AppDbContext())
+                using (var scope = _scopeFactory.CreateScope())
                 {
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     var rows = db.WorkSessions.Where(s => s.WorkHourId == workHourId).ToList();
                     if (rows.Count > 0)
                     {

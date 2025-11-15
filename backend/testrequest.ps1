@@ -1,5 +1,6 @@
 # Basic API smoke tests for backend (PowerShell)
-$baseUri = "http://localhost:5080/api/workhours"
+# $baseUri = "http://localhost:5080/api/workhours"
+$baseUri = "http://localhost:5063/api/workhours"
 
 function PostJson($uri, $obj) {
     try {

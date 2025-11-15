@@ -9,12 +9,11 @@
     "Zhang Ming Xing"
   ],
   "ProcessNames": [
-    "Unpackage",
+    "Unpack",
     "Assembly",
-    "Debug",
-    "Validation",
+    "Test",
     "Disassembly",
-    "Repackage"
+    "Pack"
   ],
   "ProcessEngineerNames": [
     "Jin Wen Jun",

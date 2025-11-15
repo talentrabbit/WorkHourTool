@@ -7,6 +7,9 @@
       </div>
       <div class="header-title">SSME MI Digital Factory</div>
       <div class="header-right">
+        <div class="version-info" title="Frontend / Backend version">FE: {{ frontendVersion }}
+          <span v-if="backendVersion"> | BE: {{ backendVersion }}</span>
+        </div>
         <div class="user-info">{{ username }}</div>
         <button v-if="username === 'Guest'" class="signin-btn" @click="openLogon" title="Sign in">Sign in</button>
         <button v-else class="signout-btn" @click="doSignOut" title="Sign out">Sign out</button>
@@ -67,6 +70,10 @@ provide('isCountingTimerActive', isCountingTimerActive)
 
 const workerNames = ref([])
 const router = useRouter()
+
+// Frontend version provided at build time via Vite env (VITE_APP_VERSION)
+const frontendVersion = ref(import.meta.env.VITE_APP_VERSION || '')
+const backendVersion = ref('')
 
 // Role-derived flags
 const isWorker = computed(() => (userRole.value || '').toLowerCase() === 'worker')
@@ -180,6 +187,18 @@ onMounted(async () => {
     const workers = await axios.get('/api/workhours/all-worker-names')
     workerNames.value = Array.isArray(workers.data) ? workers.data : []
   } catch {}
+
+  // Read backend version via API so FE and BE can be deployed independently
+  try {
+    const vres = await axios.get('/api/WorkHours/version')
+    if (vres && vres.data) {
+      backendVersion.value = vres.data.backend || vres.data.version || ''
+    }
+  } catch (e) {
+    // ignore — backend version optional
+  }
+
+  // Frontend version is resolved at build-time; no runtime fetch needed.
 })
 </script>
 
@@ -217,6 +236,9 @@ onMounted(async () => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* prevent wrapping */
 }
 .header-right { display: flex; align-items: center; gap: 16px; }
+/* Version display in the header */
+.version-info { color: #6b6b6b; font-size: 0.85rem; background: #fff; border: 1px solid transparent; padding: 6px 8px; border-radius: 8px }
+.version-info { white-space: nowrap }
 .user-info { color: #82451F; font-weight: 600; background: #FFF3E8; border: 1px solid #F2C7A6; padding: 6px 10px; border-radius: 8px; }
 .signout-btn { margin-left: 12px; background: transparent; border: 1px solid #E6C9B0; color: #82451F; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
 .signin-btn { margin-left: 12px; background: #EC6602; border: none; color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }

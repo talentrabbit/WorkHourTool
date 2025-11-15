@@ -8,6 +8,7 @@ using System.IO;
 using System.Text.Json;
 using System.Linq; // added
 using backend.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace backend.Controllers
 {
@@ -16,6 +17,7 @@ namespace backend.Controllers
     public class WorkHoursController : ControllerBase
     {
         private readonly ILogger<WorkHoursController> _logger;
+        private readonly AppDbContext _db;
         private static string[] _workerNames = new string[0];
         private static string[] _processNames = new string[0];
         private static string[] _processEngineerNames = new string[0];
@@ -66,7 +68,8 @@ namespace backend.Controllers
                                 IvkNo = Get("ProductIvk"),
                                 ModalityType = Get("Modality"),
                                 ProductLine = Get("ProductLine"),
-                                SystemType = Get("SystemType")
+                                SystemType = Get("SystemType"),
+                                ProjectNo = Get("ProjectNo")
                             });
                         }
                         _productDefinitions = list;
@@ -79,10 +82,25 @@ namespace backend.Controllers
             }
         }
 
-        public WorkHoursController(ILogger<WorkHoursController> logger, WorkSessionManager sessionManager)
+        public WorkHoursController(ILogger<WorkHoursController> logger, WorkSessionManager sessionManager, AppDbContext db)
         {
             _logger = logger;
             _sessionManager = sessionManager;
+            _db = db;
+        }
+
+        // Resolve the scoped AppDbContext for this request. Prefer HttpContext scope; fallback to injected instance.
+        private AppDbContext GetDb()
+        {
+            try
+            {
+                var scoped = HttpContext?.RequestServices?.GetService<AppDbContext>();
+                return scoped ?? _db;
+            }
+            catch
+            {
+                return _db;
+            }
         }
 
         // POST: api/WorkHours
@@ -90,7 +108,7 @@ namespace backend.Controllers
         public IActionResult Post([FromBody] WorkHourDto dto)
         {
             _logger.LogInformation("Received request to save work hours for SerialNo: {SerialNo}", dto.SerialNo);
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == dto.SerialNo);
             if (product == null)
             {
@@ -115,7 +133,7 @@ namespace backend.Controllers
         [HttpPost("submit-work-hours")]
         public IActionResult SubmitWorkHours([FromBody] SubmitWorkHoursDto dto)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == dto.SerialNo);
             if (product == null)
             {
@@ -165,7 +183,7 @@ namespace backend.Controllers
         public IActionResult GetProductWorkStatus(string serialNo)
         {
             _logger.LogInformation("Fetching product work status for SerialNo: {SerialNo}", serialNo);
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products
                 .FirstOrDefault(p => p.SerialNo == serialNo);
             if (product == null)
@@ -181,7 +199,7 @@ namespace backend.Controllers
         [HttpGet("workhours-by-system/{serialNo}")]
         public IActionResult GetWorkHoursBySystem(string serialNo)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
             if (product == null) return NotFound(new { message = "Product not found" });
 
@@ -213,7 +231,7 @@ namespace backend.Controllers
         [HttpGet("ncmtimes-by-system/{serialNo}")]
         public IActionResult GetNcmTimesBySystem(string serialNo)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
             if (product == null) return NotFound(new { message = "Product not found" });
 
@@ -233,7 +251,9 @@ namespace backend.Controllers
                     // prefer stored NcmHours if present, otherwise compute from timestamps
                     NcmHours = n.NcmHours > 0 ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
                     State = n.State,
-                    NcmAction = n.NcmAction
+                    CallingContent = n.CallingContent,
+                    CallType = n.CallType,
+                    Actions = n.Actions
                 })
                 .ToList();
 
@@ -245,14 +265,21 @@ namespace backend.Controllers
         public IActionResult GetAllProductStates()
         {
             _logger.LogInformation("Fetching all product states");
-            using var db = new AppDbContext();
+            var db = GetDb();
             var products = db.Products
                 .ToList() // Fetch products into memory
                 .Select(p => new {
                     SerialNo = p.SerialNo,
                     ProjectNo = p.ProjectNo,
                     SystemType = p.SystemType,
-                    WorkingProcess = p.WorkingProcess,
+                    // Compute the production state as the latest (by StartTime DESC) WorkHour.ProcessName
+                    // where the WorkHour.State is not 'Completed' (i.e. still in-progress or other non-completed states).
+                    // If no working item, it should be treated as 'Finished'.
+                    ProductionState = db.WorkHours
+                        .Where(wh => wh.ProductId == p.Id)
+                        .OrderByDescending(wh => wh.StartTime)
+                        .FirstOrDefault(wh => wh.State != "Completed")
+                        ?.ProcessName ?? "Finished",
                     WorkHourOverall = db.WorkHours
                         .Where(wh => wh.ProductId == p.Id)
                         .Sum(wh => (double?)wh.EffectiveHours) ?? 0,
@@ -274,7 +301,7 @@ namespace backend.Controllers
             if (dto == null) return BadRequest(new { message = "Request body required" });
             if (string.IsNullOrWhiteSpace(dto.SerialNo)) return BadRequest(new { message = "SerialNo is required" });
 
-            using var db = new AppDbContext();
+            var db = GetDb();
             var sn = dto.SerialNo.Trim();
             // check uniqueness
             if (db.Products.Any(p => p.SerialNo == sn))
@@ -303,7 +330,7 @@ namespace backend.Controllers
         {
             try
             {
-                using var db = new AppDbContext();
+                var db = GetDb();
                 var names = db.Users
                     .AsNoTracking()
                     .Where(u => !string.IsNullOrWhiteSpace(u.FullName) && !string.IsNullOrWhiteSpace(u.Role) && u.Role.ToLower().Contains("worker"))
@@ -336,7 +363,7 @@ namespace backend.Controllers
         {
             try
             {
-                using var db = new AppDbContext();
+                var db = GetDb();
                 var names = db.Users
                     .AsNoTracking()
                     .Where(u => !string.IsNullOrWhiteSpace(u.FullName) && !string.IsNullOrWhiteSpace(u.Role) && (u.Role.ToLower().Contains("engineer") || u.Role.ToLower().Contains("process")))
@@ -355,6 +382,50 @@ namespace backend.Controllers
             // fallback to configured list if DB lookup fails or returns nothing
             return Ok(_processEngineerNames);
         }
+
+        // GET: api/WorkHours/version
+        // Returns backend version information. Preferred source is Version.json located in the app base directory
+        // with shape { "version": "1.2.3" } or { "backend": "1.2.3" }. Falls back to assembly version.
+        [HttpGet("version")]
+        public IActionResult GetVersion()
+        {
+            try
+            {
+                var baseDir = AppContext.BaseDirectory ?? string.Empty;
+                var vPath = Path.Combine(baseDir, "Version.json");
+                if (System.IO.File.Exists(vPath))
+                {
+                    var txt = System.IO.File.ReadAllText(vPath);
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(txt);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("backend", out var be))
+                        {
+                            return Ok(new { backend = be.GetString() ?? string.Empty });
+                        }
+                        if (root.TryGetProperty("version", out var v))
+                        {
+                            return Ok(new { backend = v.GetString() ?? string.Empty });
+                        }
+                    }
+                    catch
+                    {
+                        // ignore parse errors and fallback to assembly
+                    }
+                }
+
+                // Fallback: use assembly version
+                var asm = System.Reflection.Assembly.GetEntryAssembly() ?? System.Reflection.Assembly.GetExecutingAssembly();
+                var av = asm?.GetName()?.Version?.ToString() ?? string.Empty;
+                return Ok(new { backend = av });
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to determine backend version");
+                return Ok(new { backend = string.Empty });
+            }
+        }
         
         // GET: api/WorkHours/worker-assignments?workerName=...
         [HttpGet("worker-assignments")]
@@ -364,7 +435,7 @@ namespace backend.Controllers
             {
                 return BadRequest(new { message = "workerName is required" });
             }
-            using var db = new AppDbContext();
+            var db = GetDb();
             var query = db.WorkHours
                 .AsNoTracking()
                 .Include(w => w.Product)
@@ -416,7 +487,7 @@ namespace backend.Controllers
         [HttpGet("all-workhours")]
         public IActionResult GetAllWorkHours()
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var list = db.WorkHours
                 .AsNoTracking()
                 .Include(w => w.Product)
@@ -444,7 +515,7 @@ namespace backend.Controllers
         [HttpGet("all-ncmtimes")]
         public IActionResult GetAllNcmTimes()
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var list = db.NcmTimes
                 .AsNoTracking()
                 .Include(n => n.Product)
@@ -460,7 +531,9 @@ namespace backend.Controllers
                     EndTime = n.EndTime,
                     NcmHours = (n.NcmHours > 0) ? n.NcmHours : (n.EndTime - n.StartTime).TotalHours,
                     State = n.State,
-                    NcmAction = n.NcmAction
+                    CallingContent = n.CallingContent,
+                    CallType = n.CallType,
+                    Actions = n.Actions
                 })
                 .ToList();
             return Ok(list);
@@ -470,7 +543,7 @@ namespace backend.Controllers
         [HttpPut("workhours/{id:int}")]
         public IActionResult UpdateWorkHour(int id, [FromBody] UpdateWorkHourDto dto)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var wh = db.WorkHours.FirstOrDefault(x => x.Id == id);
             if (wh == null)
             {
@@ -519,7 +592,7 @@ namespace backend.Controllers
         [HttpDelete("{id:int}")]
         public IActionResult DeleteWorkHourById(int id)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var wh = db.WorkHours.FirstOrDefault(x => x.Id == id);
             if (wh == null) return NotFound(new { message = $"WorkHour {id} not found" });
             db.WorkHours.Remove(wh);
@@ -531,7 +604,7 @@ namespace backend.Controllers
         [HttpPut("~/api/NcmTimes/{id:int}")]
         public IActionResult UpdateNcmTimeByRoot(int id, [FromBody] UpdateNcmTimeDto dto)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var nt = db.NcmTimes.FirstOrDefault(n => n.Id == id);
             if (nt == null)
             {
@@ -541,7 +614,8 @@ namespace backend.Controllers
             // update only provided fields
             if (dto.ProcessName != null) nt.ProcessName = dto.ProcessName;
             if (dto.ProcessEngineer != null) nt.ProcessEngineer = dto.ProcessEngineer;
-            if (dto.NcmAction != null) nt.NcmAction = dto.NcmAction;
+            // Update CallingContent when provided
+            if (dto.CallingContent != null) nt.CallingContent = dto.CallingContent;
             if (!string.IsNullOrWhiteSpace(dto.State)) nt.State = dto.State;
 
             if (dto.StartTime.HasValue) nt.StartTime = dto.StartTime.Value;
@@ -571,7 +645,7 @@ namespace backend.Controllers
         [HttpDelete("~/api/NcmTimes/{id:int}")]
         public IActionResult DeleteNcmTimeByRoot(int id)
         {
-            using var db = new AppDbContext();
+            var db = GetDb();
             var nt = db.NcmTimes.FirstOrDefault(x => x.Id == id);
             if (nt == null) return NotFound(new { message = $"NcmTime {id} not found" });
             db.NcmTimes.Remove(nt);
@@ -587,7 +661,7 @@ namespace backend.Controllers
             if (string.IsNullOrWhiteSpace(req.WorkerName)) return BadRequest(new { message = "WorkerName is required" });
             if (!req.WorkHourId.HasValue) return BadRequest(new { message = "WorkHourId is required" });
 
-            using var db = new AppDbContext();
+            var db = GetDb();
             var target = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId.Value);
             if (target == null) return NotFound(new { message = "WorkHour not found" });
 
@@ -609,7 +683,7 @@ namespace backend.Controllers
             if (string.IsNullOrWhiteSpace(req.SerialNo)) return BadRequest(new { message = "SerialNo is required" });
             if (!req.StartDate.HasValue) return BadRequest(new { message = "StartDate is required (date part of StartTime)" });
 
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == req.SerialNo);
             if (product == null) return NotFound(new { message = "Product not found for SerialNo: " + req.SerialNo });
 
@@ -639,7 +713,7 @@ namespace backend.Controllers
         public IActionResult ResetWorkHour([FromBody] ResetWorkHourRequest req)
         {
             if (req == null) return BadRequest(new { message = "Request body required" });
-            using var db = new AppDbContext();
+            var db = GetDb();
             var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
             if (wh == null) return NotFound(new { message = "WorkHour not found" });
             if (wh.State != "Working" && wh.State != "NotStarted")
@@ -701,7 +775,7 @@ namespace backend.Controllers
         public IActionResult CompleteWorkHour([FromBody] CompleteWorkHourRequest req)
         {
             if (req == null) return BadRequest(new { message = "Request body required" });
-            using var db = new AppDbContext();
+            var db = GetDb();
             var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
             if (wh == null) return NotFound(new { message = "WorkHour not found" });
 
@@ -727,7 +801,7 @@ namespace backend.Controllers
         public IActionResult GetEmailByUserName([FromQuery] string fullName)
         {
             if (string.IsNullOrWhiteSpace(fullName)) return BadRequest(new { message = "fullname is required" });
-            using var db = new AppDbContext();
+            var db = GetDb();
             var user = db.Users.FirstOrDefault(u => u.FullName == fullName);
             if (user == null || string.IsNullOrWhiteSpace(user.Mail)) return NotFound(new { message = "Email not found for user" });
             return Ok(new { email = user.Mail });
@@ -739,7 +813,7 @@ namespace backend.Controllers
         {
             if (entries == null || entries.Length == 0) return BadRequest(new { message = "No NCM entries provided" });
             var results = new System.Collections.Generic.List<object>();
-            using var db = new AppDbContext();
+            var db = GetDb();
             foreach (var e in entries)
             {
                 try
@@ -762,18 +836,29 @@ namespace backend.Controllers
                         NcmHours = hours,
                         ProductId = productId,
                         State = "Notified",
-                        NcmAction = e.NcmAction
+                                    // Use CallingContent from the request
+                                    CallingContent = e.CallingContent
                     };
                     db.NcmTimes.Add(ncm);
                     db.SaveChanges();
 
-                    _logger.LogInformation("NCM record saved for SerialNo: {SerialNo}, \n{ncm}", e.SerialNo, ncm);
+                    _logger.LogInformation("NCM record saved for SerialNo: {SerialNo}, NcmId: {NcmId}", e.SerialNo, ncm.Id);
 
                     // try to find recipient email and send mail via Outlook COM
                     var user = db.Users.FirstOrDefault(u => u.FullName == e.ProcessEngineer);
                     string email = user?.Mail ?? string.Empty;
                     var mailSent = false;
                     string mailError = string.Empty;
+
+                    if (user == null)
+                    {
+                        _logger.LogWarning("Process engineer user not found for name: {ProcessEngineer}. SerialNo: {SerialNo}", e.ProcessEngineer, e.SerialNo);
+                    }
+                    else if (string.IsNullOrWhiteSpace(email))
+                    {
+                        _logger.LogWarning("Process engineer {ProcessEngineer} has no email address configured. SerialNo: {SerialNo}", e.ProcessEngineer, e.SerialNo);
+                    }
+
                     if (!string.IsNullOrWhiteSpace(email))
                     {
                         try
@@ -786,18 +871,22 @@ namespace backend.Controllers
                                 dynamic mail = outlook.CreateItem(0); // olMailItem
                                 mail.To = email;
                                 mail.Subject = $"NCM Notification for {e.SerialNo ?? "unknown serial"}";
-                                mail.Body = $"Dear {e.ProcessEngineer},\n\nAn NCM record has been created for SerialNo: {e.SerialNo} (Process: {e.ProcessName}).\nStart: {start:yyyy-MM-dd HH:mm}, End: {end:yyyy-MM-dd HH:mm}, Hours: {hours:F2}\nAction: {e.NcmAction}\n\nPlease follow up accordingly.\n\n-- Factory System";
+                                var mailContent = e.CallingContent;
+                                mail.Body = $"Dear {e.ProcessEngineer},\n\nAn NCM record has been created for SerialNo: {e.SerialNo} (Process: {e.ProcessName}).\nStart: {start:yyyy-MM-dd HH:mm}, End: {end:yyyy-MM-dd HH:mm}, Hours: {hours:F2}\nContent: {mailContent}\n\nPlease follow up accordingly.\n\n-- Factory System";
                                 mail.Send();
                                 mailSent = true;
+                                _logger.LogInformation("NCM notification email sent to {Email} for NcmId {NcmId} (SerialNo: {SerialNo})", email, ncm.Id, e.SerialNo);
                             }
                             else
                             {
                                 mailError = "Outlook not available on server";
+                                _logger.LogWarning("Outlook COM object not available on server when attempting to notify {ProcessEngineer} for SerialNo {SerialNo}", e.ProcessEngineer, e.SerialNo);
                             }
                         }
                         catch (Exception ex)
                         {
-                            mailError = ex.Message;
+                            mailError = ex.Message + " | " + ex.InnerException?.Message;
+                            _logger.LogError(ex, "Failed to send NCM notification to {Email} for NcmId {NcmId} (SerialNo: {SerialNo}). Error: {MailError}", email, ncm.Id, e.SerialNo, mailError);
                         }
                     }
 
@@ -808,6 +897,7 @@ namespace backend.Controllers
                     results.Add(new { error = ex.Message });
                 }
             }
+            _logger.LogInformation("Processed {Count} NCM entries for saving and notification", entries.Length);
             return Ok(new { message = "NCM saved and notifications attempted", results });
         }
 		
@@ -821,7 +911,7 @@ namespace backend.Controllers
                 return BadRequest(new { message = "workerName, serialNo and startDateTime are required" });
             }
 
-            using var db = new AppDbContext();
+            var db = GetDb();
             var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
             if (product == null)
             {
@@ -877,7 +967,7 @@ namespace backend.Controllers
             }
 
             // Fallback: existing DB-backed behavior
-            using var db = new AppDbContext();
+            var db = GetDb();
             // If caller supplied a WorkHourId, try to find an open session for that WorkHour and continue it
             if (req.WorkHourId.HasValue)
             {
@@ -952,7 +1042,7 @@ namespace backend.Controllers
                 _logger?.LogWarning(ex, "WorkSessionManager failed to process heartbeat, falling back to DB persistence");
             }
 
-            using var db = new AppDbContext();
+            var db = GetDb();
             var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
             if (session == null) return NotFound(new { message = "Session not found" });
             session.LastHeartbeat = DateTime.Now;
@@ -982,7 +1072,7 @@ namespace backend.Controllers
             }
 
             // fallback: update DB directly
-            using var db = new AppDbContext();
+            var db = GetDb();
             var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
             if (session == null) return NotFound(new { message = "Session not found" });
             session.State = "Paused";
@@ -1009,7 +1099,7 @@ namespace backend.Controllers
                 _logger?.LogWarning(ex, "WorkSessionManager failed to complete session, falling back to DB persistence");
             }
 
-            using var db = new AppDbContext();
+            var db = GetDb();
             var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
             if (session == null) return NotFound(new { message = "Session not found" });
 
@@ -1031,46 +1121,52 @@ namespace backend.Controllers
             }
 
             // Optionally persist NCM rows if metadata contains an array named 'ncmRows'
-            if (!string.IsNullOrWhiteSpace(session.MetadataJson))
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(session.MetadataJson);
-                    if (doc.RootElement.TryGetProperty("ncmRows", out var ncmRows) && ncmRows.ValueKind == JsonValueKind.Array)
-                    {
-                        int productId = 0;
-                        if (session.WorkHourId.HasValue)
-                        {
-                            productId = db.WorkHours.Where(w => w.Id == session.WorkHourId.Value).Select(w => w.ProductId).FirstOrDefault();
-                        }
+            // This section is commented out as NCM is handled instantly. Re-submitting might cause conflict.
+            // if (!string.IsNullOrWhiteSpace(session.MetadataJson))
+            // {
+            //     try
+            //     {
+            //         using var doc = JsonDocument.Parse(session.MetadataJson);
+            //         if (doc.RootElement.TryGetProperty("ncmRows", out var ncmRows) && ncmRows.ValueKind == JsonValueKind.Array)
+            //         {
+            //             int productId = 0;
+            //             if (session.WorkHourId.HasValue)
+            //             {
+            //                 productId = db.WorkHours.Where(w => w.Id == session.WorkHourId.Value).Select(w => w.ProductId).FirstOrDefault();
+            //             }
 
-                        foreach (var el in ncmRows.EnumerateArray())
-                        {
-                            var pe = el.TryGetProperty("processEngineer", out var peEl) && peEl.ValueKind == JsonValueKind.String ? peEl.GetString() : null;
-                            var na = el.TryGetProperty("ncmAction", out var naEl) && naEl.ValueKind == JsonValueKind.String ? naEl.GetString() : null;
-                            double nh = 0;
-                            if (el.TryGetProperty("ncmHours", out var nhEl) && nhEl.ValueKind == JsonValueKind.Number) nh = nhEl.GetDouble();
+            //             foreach (var el in ncmRows.EnumerateArray())
+            //             {
+            //                 var pe = el.TryGetProperty("processEngineer", out var peEl) && peEl.ValueKind == JsonValueKind.String ? peEl.GetString() : null;
+            //                 var callingContent = string.Empty;
+            //                 // Read 'callingContent' from session metadata
+            //                 if (el.TryGetProperty("callingContent", out var ccEl) && ccEl.ValueKind == JsonValueKind.String)
+            //                 {
+            //                     callingContent = ccEl.GetString();
+            //                 }
+            //                 double nh = 0;
+            //                 if (el.TryGetProperty("ncmHours", out var nhEl) && nhEl.ValueKind == JsonValueKind.Number) nh = nhEl.GetDouble();
 
-                            var ncm = new NcmTime
-                            {
-                                ProcessEngineer = pe,
-                                ProcessName = session.ProcessName,
-                                StartTime = DateTime.Now,
-                                EndTime = DateTime.Now,
-                                NcmHours = nh,
-                                ProductId = productId,
-                                State = "Notified",
-                                NcmAction = na
-                            };
-                            db.NcmTimes.Add(ncm);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to parse MetadataJson for session {SessionId}", session.SessionId);
-                }
-            }
+            //                 var ncm = new NcmTime
+            //                 {
+            //                     ProcessEngineer = pe,
+            //                     ProcessName = session.ProcessName,
+            //                     StartTime = DateTime.Now,
+            //                     EndTime = DateTime.Now,
+            //                     NcmHours = nh,
+            //                     ProductId = productId,
+            //                     State = "Notified",
+            //                     CallingContent = callingContent
+            //                 };
+            //                 db.NcmTimes.Add(ncm);
+            //             }
+            //         }
+            //     }
+            //     catch (Exception ex)
+            //     {
+            //         _logger?.LogWarning(ex, "Failed to parse MetadataJson for session {SessionId}", session.SessionId);
+            //     }
+            // }
 
             db.SaveChanges();
             return Ok(new { message = "session completed" });
@@ -1172,7 +1268,8 @@ namespace backend.Controllers
             // Optional NCM reporting
             public double? NcmHours { get; set; }
             public string? ProcessEngineer { get; set; }
-            public string? NcmAction { get; set; }
+            // Preferred new name for textual NCM content
+            public string? CallingContent { get; set; }
         }
 
         public class UpdateWorkHourDto
@@ -1193,7 +1290,8 @@ namespace backend.Controllers
         {
             public string? ProcessName { get; set; }
             public string? ProcessEngineer { get; set; }
-            public string? NcmAction { get; set; }
+            // Modern NCM text property
+            public string? CallingContent { get; set; }
             public string? State { get; set; }
             // allow updating the timestamps from the UI
             public DateTime? StartTime { get; set; }
@@ -1238,7 +1336,8 @@ namespace backend.Controllers
             public string? ProcessName { get; set; }
             public DateTime? StartTime { get; set; }
             public DateTime? EndTime { get; set; }
-            public string? NcmAction { get; set; }
+            // Preferred new property
+            public string? CallingContent { get; set; }
 
             public double NcmHours { get; set; }
         }

@@ -1,7 +1,7 @@
 <template>
   <div class="ncm-container">
     <h2>NCM Time Maintenance</h2>
-    <p>{{ showAll ? 'All NCM listed' : 'Showing NCM records assigned to you (' + username + ').' }}</p>
+    <p>{{ showAll ? 'Administrator login, so all NCM listed' : 'Showing NCM records assigned to you (' + username + ').' }}</p>
     <div v-if="loading" class="loading">Loading...</div>
     <div v-else>
       <!-- render each systemType group as its own titled block with its own table so headers align -->
@@ -15,11 +15,13 @@
                   <th class="col-serial">SerialNo</th>
                   <th v-if="showAll" class="col-engineer">Engineer</th>
                   <th class="col-process">Process</th>
+                  <th class="col-calltype">CallType</th>
+                  <th class="col-actions">Actions</th>
                   <th class="col-hours">Hours</th>
                   <th class="col-start">Start</th>
                   <th class="col-end">End</th>
                   <th class="col-state">State</th>
-                  <th class="col-action">Action</th>
+                  <th class="col-content">Content</th>
                   <th class="col-save" aria-hidden="true"></th>
                 </tr>
               </thead>
@@ -28,6 +30,15 @@
                   <td class="col-serial" :title="row.serialNo">{{ row.serialNo }}</td>
                   <td v-if="showAll" class="col-engineer" :title="row.processEngineer">{{ row.processEngineer }}</td>
                   <td class="col-process" :title="row.processName">{{ row.processName }}</td>
+                  <td class="col-calltype">
+                    <select v-model="row.callType" :title="row.callType">
+                      <option value="NCM">NCM</option>
+                      <option value="OTHER">Other Anomaly</option>
+                    </select>
+                  </td>
+                  <td class="col-actions">
+                    <textarea v-model="row.actions" :title="row.actions"></textarea>
+                  </td>
                   <td class="col-hours">
                     <input type="number" v-model.number="row.ncmHours" step="0.001" placeholder="" :title="row.ncmHours" />
                   </td>
@@ -40,8 +51,8 @@
                   <td class="col-state">
                     <input v-model="row.state" :title="row.state" />
                   </td>
-                  <td class="col-action">
-                    <input v-model="row.ncmAction" :title="row.ncmAction" />
+                  <td class="col-content">
+                    <input v-model="row.callingContent" :title="row.callingContent" />
                   </td>
                   <td class="col-save">
                     <button @click="updateRow(row)">Save</button>
@@ -116,7 +127,17 @@ onMounted(async () => {
         startTime: r.startTime,
         endTime: r.endTime,
         state: r.state || '',
-        ncmAction: r.ncmAction || '',
+        // normalize callType into internal codes: 'NCM' or 'OTHER' when possible
+        callType: (function(){
+          const raw = (r.callType !== undefined && r.callType !== null) ? r.callType : (r.CallType !== undefined && r.CallType !== null ? r.CallType : '');
+          const s = String(raw || '').trim();
+          if (!s) return '';
+          if (/other/i.test(s)) return 'OTHER';
+          if (s.toUpperCase() === 'NCM') return 'NCM';
+          return s;
+        })(),
+        actions: (r.actions !== undefined && r.actions !== null) ? r.actions : (r.Actions !== undefined && r.Actions !== null ? r.Actions : ''),
+        callingContent: r.callingContent || '',
         _startLocal: toLocalInput(r.startTime),
         _endLocal: toLocalInput(r.endTime)
       })
@@ -137,7 +158,9 @@ async function updateRow(row) {
     StartTime: fromLocalInput(row._startLocal),
     EndTime: fromLocalInput(row._endLocal),
     State: row.state,
-    NcmAction: row.ncmAction,
+    CallingContent: row.callingContent,
+    CallType: row.callType,
+    Actions: row.actions,
     NcmHours: (row.ncmHours !== undefined && row.ncmHours !== null) ? Number(row.ncmHours) : (null)
   }
   try {
@@ -188,14 +211,39 @@ function formatNcmHours(ncm, start, end) {
 /* column sizing helpers */
 .ncm-table th.col-serial, .ncm-table td.col-serial { min-width: 90px; width: 8%; }
 .ncm-table th.col-engineer, .ncm-table td.col-engineer { min-width: 140px; width: 14%; }
-.ncm-table th.col-process, .ncm-table td.col-process { min-width: 220px; width: 28%; }
+.ncm-table th.col-process, .ncm-table td.col-process { min-width: 80px; width: 10%; }
 .ncm-table th.col-hours, .ncm-table td.col-hours { min-width: 80px; width: 8%; }
+.ncm-table th.col-calltype, .ncm-table td.col-calltype { min-width: 70px; width: 10%; }
 .ncm-table th.col-start, .ncm-table td.col-start { min-width: 160px; width: 12%; }
 .ncm-table th.col-end, .ncm-table td.col-end { min-width: 160px; width: 12%; }
-.ncm-table th.col-state, .ncm-table td.col-state { min-width: 120px; width: 10%; }
-.ncm-table th.col-action, .ncm-table td.col-action { min-width: 160px; width: 12%; }
+.ncm-table th.col-state, .ncm-table td.col-state { min-width: 100px; width: 10%; }
+.ncm-table th.col-content, .ncm-table td.col-content { min-width: 160px; width: 12%; }
 .ncm-table th.col-save, .ncm-table td.col-save { min-width: 80px; width: 6%; }
-.ncm-table input { width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 6px; }
+.ncm-table th.col-actions, .ncm-table td.col-actions { min-width: 160px; width: 28%; }
+/* Unified styling for form controls inside table cells so edges are visible and consistent */
+.ncm-table td input,
+.ncm-table td select,
+.ncm-table td textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ncm-table td textarea { min-height: 56px; resize: vertical; }
+/* add a visible down-arrow cue for selects to remind users to click */
+.ncm-table td select {
+  cursor: pointer;
+  /* small chevron SVG (grey) as background image, percent-encoded */
+  background-image: url("data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2010%206'%3E%3Cpath%20fill='none'%20stroke='%23888'%20stroke-width='1.5'%20stroke-linecap='round'%20stroke-linejoin='round'%20d='M1%201l4%204%204-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  padding-right: 36px; /* leave room for arrow */
+}
 .empty { margin-top: 1rem; color: #666 }
 .loading { color: #82451F }
 button { background: #EC6602; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer }

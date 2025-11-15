@@ -17,7 +17,13 @@ namespace backend.DbModel
         // State of the NcmTime entry: NotStarted, Working, Completed, etc.
         public string State { get; set; } = "NotStarted";
 
-        // Action/description for the NCM time
-        public string? NcmAction { get; set; }
+        // Renamed from NcmAction -> CallingContent
+        public string? CallingContent { get; set; }
+
+        // New: type/category of the call (e.g., Phone, Email, Meeting)
+        public string? CallType { get; set; }
+
+        // New: actions taken or next steps summary
+        public string? Actions { get; set; }
     }
 }

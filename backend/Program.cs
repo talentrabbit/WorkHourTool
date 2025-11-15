@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using backend.Data;
+using Microsoft.Extensions.DependencyInjection;
 
 // Parse optional port from command-line or environment and set ASPNETCORE_URLS before building the host
 // Supported: --port=5080, --port 5080, --aspnetcore-port=5080, -p 5080, port=5080
@@ -59,6 +61,10 @@ if (_parsedPort.HasValue)
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Reduce verbose EF Core SQL logs: show only warnings or above for EF Core categories
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", Microsoft.Extensions.Logging.LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", Microsoft.Extensions.Logging.LogLevel.Warning);
+
 // Configure Serilog to write logs to a file with timestamps
 var logsPath = Path.Combine(AppContext.BaseDirectory, "logs");
 Directory.CreateDirectory(logsPath);
@@ -70,6 +76,9 @@ try
     {
         lc
             .MinimumLevel.Information()
+            // Avoid logging EF Core SQL text (Database.Command) at Information level
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .WriteTo.File(
                 Path.Combine(logsPath, "backend-.log"),
@@ -126,6 +135,37 @@ builder.Services.AddSingleton<backend.Services.WorkSessionManager>();
 
 builder.Services.AddHostedService<backend.Services.WorkSessionCleanupService>();
 
+// Configure EF Core DbContext via DI (pooled). Reads DbPath/DbProvider from appsettings.json.
+try
+{
+    var dbProvider = (builder.Configuration["DbProvider"] ?? "sqlite").ToLowerInvariant();
+    var dbPathConfig = builder.Configuration["DbPath"];
+    string connString;
+    if (!string.IsNullOrWhiteSpace(dbPathConfig))
+    {
+        var dbPath = Path.IsPathRooted(dbPathConfig)
+            ? dbPathConfig
+            : Path.Combine(AppContext.BaseDirectory, dbPathConfig);
+        connString = $"Data Source={dbPath}";
+    }
+    else
+    {
+        connString = AppDbContext.ConnectionString;
+    }
+
+    if (dbProvider == "sqlserver")
+    {
+        builder.Services.AddDbContextPool<AppDbContext>(options => options.UseSqlServer(connString), poolSize: 64);
+    }
+    else
+    {
+        builder.Services.AddDbContextPool<AppDbContext>(options => options.UseSqlite(connString), poolSize: 64);
+    }
+}
+catch { /* fallback to AppDbContext.OnConfiguring if DI setup fails */ }
+
+// DbContext registered above via AddDbContextPool with options; no additional registration needed here.
+
 var app = builder.Build();
 
 // Load roles config
@@ -165,11 +205,8 @@ app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Ensure static files (wwwroot) are served so the built SPA can be placed in the backend publish folder
-app.UseDefaultFiles(); // enables default file mapping (index.html)
-app.UseStaticFiles();  // serve files from wwwroot
-
 // SPA fallback: for any non-API request without a file extension, serve index.html
+// Run the fallback before static files so deep routes (e.g. /planning) return the SPA
 app.Use(async (context, next) =>
 {
     // If the request is not for /api and does not contain a file extension, rewrite to /index.html
@@ -180,6 +217,10 @@ app.Use(async (context, next) =>
     }
     await next();
 });
+
+// Ensure static files (wwwroot) are served so the built SPA can be placed in the backend publish folder
+app.UseDefaultFiles(); // enables default file mapping (index.html)
+app.UseStaticFiles();  // serve files from wwwroot
 
 // Helper that builds the response object for current user
 static (string user, string displayName, List<string> roles) BuildUserResponse(string? effectiveUser, string? displayName, RoleConfig rolesConfig)
@@ -396,14 +437,15 @@ static string ExtractSamAccountName(string domainQualified)
 app.MapGet("/api/auth/roles", () => Results.Ok(rolesConfig)).AllowAnonymous();
 
 // Endpoint to find a user by Gid, FullName or Mail (case-insensitive)
-app.MapGet("/api/auth/find-user", (HttpRequest http, ILogger<Program> logger) =>
+app.MapGet("/api/auth/find-user", (HttpRequest http, ILogger<Program> logger, IServiceScopeFactory scopeFactory) =>
 {
     var q = http.Query["q"].FirstOrDefault()?.Trim();
     if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { message = "q query parameter is required" });
     var qn = q.ToLowerInvariant();
     try
     {
-        using var db = new backend.Data.AppDbContext();
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<backend.Data.AppDbContext>();
         var user = db.Users.AsNoTracking()
             .FirstOrDefault(u =>
                 (!string.IsNullOrWhiteSpace(u.Gid) && u.Gid.ToLower().Contains(qn)) ||
