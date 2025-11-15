@@ -18,6 +18,12 @@ namespace backend.Data
         public static string DbProvider { get; set; } = "sqlite";
         public static string ConnectionString { get; set; } = "Data Source=workhour.db";
 
+        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+        {
+            // Ensure database and tables are created
+            Database.EnsureCreated();
+        }
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             // If the DbContext was configured via DI (AddDbContext) the optionsBuilder will already be configured.
@@ -96,7 +102,9 @@ namespace backend.Data
             modelBuilder.Entity<NcmTime>(eb =>
             {
                 eb.Property(n => n.State).HasMaxLength(50).HasDefaultValue("NotStarted");
-                eb.Property(n => n.NcmAction).HasMaxLength(500);
+                eb.Property(n => n.CallingContent).HasMaxLength(500); // renamed from NcmAction
+                eb.Property(n => n.CallType).HasMaxLength(100);
+                eb.Property(n => n.Actions).HasMaxLength(500);
             });
 
             // WorkSession snapshots for client-server session management

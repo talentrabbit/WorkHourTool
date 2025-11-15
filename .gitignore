@@ -41,3 +41,4 @@ backend/workhour.db
 *.csv
 backend/*- Copy.db
 backend/testrequest.ps1
+/exports

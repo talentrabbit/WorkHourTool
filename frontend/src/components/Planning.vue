@@ -297,16 +297,16 @@ function resetNonProductDefaults() {
   const tomorrow = getTomorrowDateStr()
   nonProductTask.value.startDate = tomorrow
   nonProductTask.value.endDate = tomorrow
-  nonProductTask.value.startTime = '08:30'
-  nonProductTask.value.endTime = '17:00'
+  nonProductTask.value.startTime = '08:45'
+  nonProductTask.value.endTime = '16:45'
 }
 
 function resetProductDefaults() {
   const tomorrow = getTomorrowDateStr()
   task.value.startDate = tomorrow
   task.value.endDate = tomorrow
-  task.value.startTime = '08:30'
-  task.value.endTime = '17:00'
+  task.value.startTime = '08:45'
+  task.value.endTime = '16:45'
 }
 
 // detect whether the selected date range spans a weekend (Sat or Sun)
@@ -356,12 +356,12 @@ onMounted(async () => {
   const tomorrow = getTomorrowDateStr()
   task.value.startDate = tomorrow
   task.value.endDate = tomorrow
-  task.value.startTime = '08:30'
-  task.value.endTime = '17:00'
+  task.value.startTime = '08:45'
+  task.value.endTime = '16:45'
   nonProductTask.value.startDate = tomorrow
   nonProductTask.value.endDate = tomorrow
-  nonProductTask.value.startTime = '08:30'
-  nonProductTask.value.endTime = '17:00'
+  nonProductTask.value.startTime = '08:45'
+  nonProductTask.value.endTime = '16:45'
 })
 
 watch(() => task.value.workerName, () => {
@@ -495,7 +495,8 @@ async function fetchAllProducts() {
         serialNo: p.serialNo ?? p.SerialNo,
         projectNo: p.projectNo ?? p.ProjectNo,
         systemType: p.systemType ?? p.SystemType,
-        productionState: p.workingProcess ?? p.WorkingProcess,
+        // The backend now returns a computed `productionState` (earliest non-NotStarted WorkHour process)
+        productionState: p.productionState ?? p.workingProcess ?? p.WorkingProcess,
         workHourOverall: p.workHourOverall ?? p.WorkHourOverall ?? 0,
         ncmTimeOverall: p.ncmTimeOverall ?? p.NcmTimeOverall ?? 0
       }))
@@ -832,8 +833,8 @@ function openNonProductPanel() {
   const tomorrow = getTomorrowDateStr()
   nonProductTask.value.startDate = tomorrow
   nonProductTask.value.endDate = tomorrow
-  nonProductTask.value.startTime = '08:30'
-  nonProductTask.value.endTime = '17:00'
+  nonProductTask.value.startTime = '08:45'
+  nonProductTask.value.endTime = '16:45'
 }
 function closeNonProductPanel() {
   showNonProduct.value = false

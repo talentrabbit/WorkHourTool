@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using backend.Data;
 using backend.DbModel;
 
@@ -16,6 +17,7 @@ namespace backend.Services
         private readonly ILogger<WorkSessionCleanupService> _logger;
         private readonly WorkSessionManager _manager;
         private readonly IConfiguration _config;
+    private readonly IServiceScopeFactory _scopeFactory;
 
         // defaults
         private bool _enabled = true;
@@ -24,11 +26,12 @@ namespace backend.Services
         private TimeSpan _scheduleTime = TimeSpan.Zero; // midnight
         private TimeSpan _staleThreshold = TimeSpan.FromHours(8);
 
-        public WorkSessionCleanupService(ILogger<WorkSessionCleanupService> logger, WorkSessionManager manager, IConfiguration config)
+        public WorkSessionCleanupService(ILogger<WorkSessionCleanupService> logger, WorkSessionManager manager, IConfiguration config, IServiceScopeFactory scopeFactory)
         {
             _logger = logger;
             _manager = manager;
             _config = config;
+            _scopeFactory = scopeFactory;
 
             try
             {
@@ -64,7 +67,8 @@ namespace backend.Services
             {
                 try
                 {
-                    using var db = new AppDbContext();
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     var startDate = DateTime.Today.AddDays(-_restoreWindowDays);
                     var toRestore = db.WorkSessions
                         .Where(s => (s.State == "Working" || s.State == "NotStarted") && s.StartTimeActual >= startDate)
@@ -124,7 +128,8 @@ namespace backend.Services
                     }
                     catch (TaskCanceledException) { break; }
 
-                    using var db = new AppDbContext();
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     var cutoff = DateTime.Now - _staleThreshold; // sessions with LastHeartbeat older than this are stale
                     _logger.LogInformation("WorkSessionCleanupService running cleanup at {Now}, cutoff {Cutoff}", DateTime.Now, cutoff);
 
@@ -176,7 +181,7 @@ namespace backend.Services
                                             foreach (var el in ncmRows.EnumerateArray())
                                             {
                                                 var pe = el.TryGetProperty("processEngineer", out var peEl) && peEl.ValueKind == JsonValueKind.String ? peEl.GetString() : null;
-                                                var na = el.TryGetProperty("ncmAction", out var naEl) && naEl.ValueKind == JsonValueKind.String ? naEl.GetString() : null;
+                                                var callingContent = el.TryGetProperty("callingContent", out var ccEl) && ccEl.ValueKind == JsonValueKind.String ? ccEl.GetString() : null;
                                                 double nh = 0;
                                                 if (el.TryGetProperty("ncmHours", out var nhEl) && nhEl.ValueKind == JsonValueKind.Number) nh = nhEl.GetDouble();
 
@@ -189,7 +194,7 @@ namespace backend.Services
                                                     NcmHours = nh,
                                                     ProductId = productId,
                                                     State = "Notified",
-                                                    NcmAction = na
+                                                    CallingContent = callingContent
                                                 };
                                                 db.NcmTimes.Add(ncm);
                                             }

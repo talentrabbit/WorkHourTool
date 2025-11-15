@@ -75,7 +75,8 @@ const currentWorkHourId = ref(null)
 
 // NCM metadata captured when NCM timer is started
 const processEngineer = ref('')
-const ncmAction = ref('')
+// Renamed: ncmAction -> callingContent (backend NcmTime.CallingContent)
+const callingContent = ref('')
 const showNcmInputs = ref(false)
 const submitted = ref(false)
 
@@ -114,11 +115,11 @@ function confirmSubmit() {
 
 // New: support multiple NCM entries and dropdown options
 const processEngineerOptions = ref([])
-const ncmRows = ref([{ processEngineer: '', ncmAction: '', sent: false }])
+const ncmRows = ref([{ processEngineer: '', callingContent: '', sent: false }])
 const sendingNcms = ref(false)
 
 const availableCount = computed(() => {
-  return ncmRows.value.filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim()))).length
+  return ncmRows.value.filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.callingContent && r.callingContent.trim()))).length
 })
 
 // Fetch process engineer names for the dropdown
@@ -134,7 +135,7 @@ async function fetchProcessEngineers() {
 
 // Add a new empty NCM row
 function addNcmRow() {
-  ncmRows.value.push({ processEngineer: '', ncmAction: '', sent: false })
+  ncmRows.value.push({ processEngineer: '', callingContent: '', sent: false })
 }
 // Remove a row by index
 function removeNcmRow(index) {
@@ -158,7 +159,7 @@ async function sendNcms() {
   const start = new Date()
   const end = new Date()
   const payload = ncmRows.value
-    .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim())))
+    .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.callingContent && r.callingContent.trim())))
     .map(r => ({
       SerialNo: serialNo.value,
       ProcessEngineer: r.processEngineer && r.processEngineer.trim() ? r.processEngineer.trim() : null,
@@ -166,7 +167,8 @@ async function sendNcms() {
       // send local time string (no Z) instead of Date object which serializes as UTC
       StartTime: formatLocalIso(start),
       EndTime: formatLocalIso(end),
-      NcmAction: r.ncmAction && r.ncmAction.trim() ? r.ncmAction.trim() : null
+      // Transitional: send both new and legacy names
+      CallingContent: r.callingContent && r.callingContent.trim() ? r.callingContent.trim() : null,
     }))
   if (!payload.length) {
     alert('Please add at least one NCM entry to send')
@@ -180,7 +182,7 @@ async function sendNcms() {
     let sentIndex = 0
     for (let i = 0; i < ncmRows.value.length; i++) {
       const r = ncmRows.value[i]
-      if (!r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim()))) {
+      if (!r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.callingContent && r.callingContent.trim()))) {
         // mark as sent
         r.sent = true
         sentIndex++
@@ -336,8 +338,8 @@ async function submitWorkHours() {
     const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest', EffectiveHours: effectiveHours }
 
     payload.ProcessEngineer = processEngineer.value || null
-    payload.NcmAction = ncmAction.value || null
-
+    // Send both new and legacy property names until backend drops legacy
+    payload.CallingContent = callingContent.value || null
 
     const res = await axios.post('/api/WorkHours/complete', payload)
     console.log('Complete response', res.data)
@@ -435,7 +437,7 @@ watch(serialNo, (nv, ov) => {
     currentWorkHourId.value = null
     // clear ncm inputs when serial changes
     processEngineer.value = ''
-    ncmAction.value = ''
+    callingContent.value = ''
     showNcmInputs.value = false
     // clear submitted state when switching systems
     submitted.value = false
@@ -641,8 +643,8 @@ onBeforeUnmount(() => {
               <option v-for="(opt, i) in processEngineerOptions" :key="i" :value="opt">{{ opt }}</option>
             </select>
 
-            <label class="ncm-input-label" style="flex:0 0 120px;">NCM Action:</label>
-            <input v-model="row.ncmAction" class="ncm-input" placeholder="Enter action" :disabled="row.sent" />
+            <label class="ncm-input-label" style="flex:0 0 120px;">Calling Content:</label>
+            <input v-model="row.callingContent" class="ncm-input" placeholder="Enter content" :disabled="row.sent" />
 
             <button class="ncm-row-btn" @click="removeNcmRow(idx)" title="Remove" v-if="ncmRows.length > 1 && !row.sent">-</button>
             <button class="ncm-row-btn" @click="addNcmRow" title="Add" v-if="idx === ncmRows.length - 1">+</button>
@@ -1011,9 +1013,9 @@ onBeforeUnmount(() => {
 .confirm-title { font-weight: 700; color: #e74c3c; }
 .confirm-body { color: #333; }
 .confirm-buttons { display:flex; justify-content:flex-end; gap:0.5rem; }
-.confirm-btn { padding: 0.5rem 0.9rem; border-radius:6px; border:none; cursor:pointer; }
-.confirm-btn.cancel { background:#eee; color:#333; }
-.confirm-btn.confirm { background:#e74c3c; color:#fff; }
+.confirm-btn { padding: 0.5rem 0.9rem; border-radius: 6px; border: none; cursor: pointer; }
+.confirm-btn.cancel { background: #eee; color: #333; }
+.confirm-btn.confirm { background: #e74c3c; color: #fff; }
 
 .fade-message {
   position: fixed;

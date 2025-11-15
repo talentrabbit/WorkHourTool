@@ -180,7 +180,7 @@
           </vxe-column>
 
           <vxe-column field="ncmHour" title="NcmHour" width="140" />
-          <vxe-column field="ncmAction" title="NcmAction" width="200" />
+          <vxe-column field="callingContent" title="CallingContent" width="200" />
 
         </vxe-table>
       </div>
