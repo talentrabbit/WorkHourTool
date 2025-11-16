@@ -15,48 +15,23 @@
                   <th class="col-serial">SerialNo</th>
                   <th v-if="showAll" class="col-engineer">Engineer</th>
                   <th class="col-process">Process</th>
-                  <th class="col-calltype">CallType</th>
-                  <th class="col-actions">Actions</th>
                   <th class="col-hours">Hours</th>
                   <th class="col-start">Start</th>
                   <th class="col-end">End</th>
                   <th class="col-state">State</th>
                   <th class="col-content">Content</th>
-                  <th class="col-save" aria-hidden="true"></th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in group.rows" :key="row.id">
+                <tr v-for="row in group.rows" :key="row.id" class="clickable" @click="openEditor(row)">
                   <td class="col-serial" :title="row.serialNo">{{ row.serialNo }}</td>
                   <td v-if="showAll" class="col-engineer" :title="row.processEngineer">{{ row.processEngineer }}</td>
                   <td class="col-process" :title="row.processName">{{ row.processName }}</td>
-                  <td class="col-calltype">
-                    <select v-model="row.callType" :title="row.callType">
-                      <option value="NCM">NCM</option>
-                      <option value="OTHER">Other Anomaly</option>
-                    </select>
-                  </td>
-                  <td class="col-actions">
-                    <textarea v-model="row.actions" :title="row.actions"></textarea>
-                  </td>
-                  <td class="col-hours">
-                    <input type="number" v-model.number="row.ncmHours" step="0.001" placeholder="" :title="row.ncmHours" />
-                  </td>
-                  <td class="col-start">
-                    <input type="datetime-local" v-model="row._startLocal" :title="row._startLocal" />
-                  </td>
-                  <td class="col-end">
-                    <input type="datetime-local" v-model="row._endLocal" :title="row._endLocal" />
-                  </td>
-                  <td class="col-state">
-                    <input v-model="row.state" :title="row.state" />
-                  </td>
-                  <td class="col-content">
-                    <input v-model="row.callingContent" :title="row.callingContent" />
-                  </td>
-                  <td class="col-save">
-                    <button @click="updateRow(row)">Save</button>
-                  </td>
+                  <td class="col-hours" :title="formatNcmHours(row.ncmHours, row.startTime, row.endTime)">{{ formatNcmHours(row.ncmHours, row.startTime, row.endTime) }}</td>
+                  <td class="col-start" :title="row._startLocal">{{ row._startLocal }}</td>
+                  <td class="col-end" :title="row._endLocal">{{ row._endLocal }}</td>
+                  <td class="col-state" :title="row.state">{{ row.state }}</td>
+                  <td class="col-content" :title="row.callingContent">{{ row.callingContent }}</td>
                 </tr>
               </tbody>
             </table>
@@ -64,6 +39,72 @@
         </div>
       </template>
       <div v-if="!records.length" class="empty">No NCM records for your account.</div>
+    </div>
+    
+    <!-- Modal Editor -->
+    <div v-if="modalOpen" class="modal-overlay" @click.self="closeEditor">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div class="serial">SerialNo: <strong>{{ productBrief.serialNo || editing.serialNo }}</strong></div>
+            <div class="brief">ProductLine: <strong>{{ productBrief.productLine || '-' }}</strong> · SystemType: <strong>{{ productBrief.systemType || editing.systemType || '-' }}</strong></div>
+          </div>
+          <button class="close-btn" @click="closeEditor">×</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-row" v-if="showAll">
+            <label>Process Engineer</label>
+            <select v-model="editing.processEngineer">
+              <option value="">--</option>
+              <option v-for="name in processEngineers" :key="name" :value="name">{{ name }}</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Process Name</label>
+            <input v-model="editing.processName" />
+          </div>
+          <div class="form-row">
+            <label>Call Type</label>
+            <select v-model="editing.callType">
+              <option value="">--</option>
+              <option value="NCM">NCM</option>
+              <option value="OTHER">Other Anomaly</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Actions</label>
+            <textarea v-model="editing.actions" rows="3"></textarea>
+          </div>
+          <div class="form-grid">
+            <div class="form-row">
+              <label>Start</label>
+              <input type="datetime-local" v-model="editing._startLocal" />
+            </div>
+            <div class="form-row">
+              <label>End</label>
+              <input type="datetime-local" v-model="editing._endLocal" />
+            </div>
+            <div class="form-row">
+              <label>NCM Hours</label>
+              <input type="number" step="0.001" v-model.number="editing.ncmHours" />
+            </div>
+          </div>
+          <div class="form-row">
+            <label>State</label>
+            <input v-model="editing.state" />
+          </div>
+          <div class="form-row">
+            <label>Content</label>
+            <textarea v-model="editing.callingContent" rows="3"></textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="secondary" @click="closeEditor">Cancel</button>
+          <button @click="saveEditor">Save</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -80,6 +121,8 @@ const showAll = computed(() => role.value === 'administrator' || role.value === 
 
 const records = ref([])
 const loading = ref(false)
+// list of process engineer names for dropdown
+const processEngineers = ref([])
 
 function toLocalInput(dtStr) {
   if (!dtStr) return ''
@@ -144,6 +187,14 @@ onMounted(async () => {
     })
 
     records.value = Object.keys(groupsMap).map(k => ({ systemType: k, rows: groupsMap[k] }))
+    // fetch process engineer names for the modal dropdown (best-effort)
+    try {
+      const pe = await axios.get('/api/WorkHours/all-process-engineer-names')
+      if (Array.isArray(pe.data)) processEngineers.value = pe.data
+    } catch (e) {
+      // non-fatal: keep list empty
+      console.warn('Failed to load process engineer names', e)
+    }
   } catch (e) {
     console.error('Failed to load NCM records', e)
     records.value = []
@@ -152,20 +203,68 @@ onMounted(async () => {
   }
 })
 
-async function updateRow(row) {
+// Modal state and helpers
+const modalOpen = ref(false)
+const editing = ref({})
+const productBrief = ref({ serialNo: '', productLine: '', systemType: '' })
+
+function openEditor(row) {
+  // deep-ish copy for editing
+  editing.value = JSON.parse(JSON.stringify(row))
+  productBrief.value = { serialNo: row.serialNo, productLine: '', systemType: row.systemType || '' }
+  modalOpen.value = true
+  // fetch product brief (productLine/systemType) by serial
+  fetchProductBrief(row.serialNo)
+  // ensure current engineer appears in the dropdown list so it can be selected
+  if (editing.value.processEngineer && !processEngineers.value.includes(editing.value.processEngineer)) {
+    processEngineers.value = [editing.value.processEngineer].concat(processEngineers.value)
+  }
+}
+
+function closeEditor() {
+  modalOpen.value = false
+}
+
+async function fetchProductBrief(serial) {
+  try {
+    const res = await axios.get(`/api/WorkHours/product-status/${encodeURIComponent(serial)}`)
+    const p = res.data || {}
+    productBrief.value = {
+      serialNo: p.serialNo || serial,
+      productLine: p.productLine || '',
+      systemType: p.systemType || editing.value.systemType || ''
+    }
+  } catch (e) {
+    // non-fatal
+    console.warn('Failed to fetch product brief', e)
+  }
+}
+
+async function saveEditor() {
+  const row = editing.value
   const payload = {
-    // allow editing timestamps and state/action
     StartTime: fromLocalInput(row._startLocal),
     EndTime: fromLocalInput(row._endLocal),
     State: row.state,
     CallingContent: row.callingContent,
     CallType: row.callType,
     Actions: row.actions,
-    NcmHours: (row.ncmHours !== undefined && row.ncmHours !== null) ? Number(row.ncmHours) : (null)
+    NcmHours: (row.ncmHours !== undefined && row.ncmHours !== null) ? Number(row.ncmHours) : null,
+    ProcessName: row.processName,
+    ProcessEngineer: row.processEngineer
   }
   try {
     await axios.put(`/api/NcmTimes/${row.id}`, payload)
-    alert('Saved')
+    // reflect changes back into list
+    const grp = records.value.find(g => g.rows.some(r => r.id === row.id))
+    if (grp) {
+      const idx = grp.rows.findIndex(r => r.id === row.id)
+      if (idx >= 0) {
+        const updated = { ...grp.rows[idx], ...row }
+        grp.rows.splice(idx, 1, updated)
+      }
+    }
+    closeEditor()
   } catch (e) {
     console.error('Save failed', e)
     alert('Save failed: ' + (e?.response?.data?.message || e.message))
@@ -213,12 +312,10 @@ function formatNcmHours(ncm, start, end) {
 .ncm-table th.col-engineer, .ncm-table td.col-engineer { min-width: 140px; width: 14%; }
 .ncm-table th.col-process, .ncm-table td.col-process { min-width: 80px; width: 10%; }
 .ncm-table th.col-hours, .ncm-table td.col-hours { min-width: 80px; width: 8%; }
-.ncm-table th.col-calltype, .ncm-table td.col-calltype { min-width: 70px; width: 10%; }
 .ncm-table th.col-start, .ncm-table td.col-start { min-width: 160px; width: 12%; }
 .ncm-table th.col-end, .ncm-table td.col-end { min-width: 160px; width: 12%; }
 .ncm-table th.col-state, .ncm-table td.col-state { min-width: 100px; width: 10%; }
 .ncm-table th.col-content, .ncm-table td.col-content { min-width: 160px; width: 12%; }
-.ncm-table th.col-save, .ncm-table td.col-save { min-width: 80px; width: 6%; }
 .ncm-table th.col-actions, .ncm-table td.col-actions { min-width: 160px; width: 28%; }
 /* Unified styling for form controls inside table cells so edges are visible and consistent */
 .ncm-table td input,
@@ -249,4 +346,24 @@ function formatNcmHours(ncm, start, end) {
 button { background: #EC6602; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer }
 button:hover { opacity: 0.95 }
 .group-header { background: #FFF4E6; font-weight: 700; color: #8a4b1a; }
+
+/* clickable rows */
+.clickable { cursor: pointer; }
+.clickable:hover { background: #fff8f1; }
+
+/* Modal styles */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { width: min(900px, 92vw); max-height: 86vh; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; background: #FFF4E6; padding: 12px 16px; border-bottom: 1px solid #f1dfd1; }
+.modal-header .serial { font-size: 1rem; color: #6a3a12; }
+.modal-header .brief { font-size: 0.9rem; color: #8a4b1a; margin-top: 2px; }
+.close-btn { background: transparent; color: #8a4b1a; font-size: 22px; line-height: 1; padding: 4px 8px; border-radius: 6px; }
+.close-btn:hover { background: rgba(0,0,0,0.06); }
+.modal-body { padding: 14px 16px; overflow: auto; }
+.form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.form-row > label { font-weight: 600; color: #5b3312; }
+.form-row > input, .form-row > select, .form-row > textarea { border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; border-top: 1px solid #eee; }
+.modal-footer .secondary { background: #e6e6e6; color: #333; }
 </style>

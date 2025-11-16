@@ -33,20 +33,6 @@ if (!(Test-Path -Path $PublishDir)) {
 try {
     Write-Host "Performing publish-folder cleanup..." -ForegroundColor Cyan
 
-    # Stop the service if it exists
-    $existingSvc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    if ($existingSvc) {
-        if ($existingSvc.Status -ne 'Stopped') {
-            Write-Host ("Stopping service " + $serviceName + " before cleanup...")
-            try {
-                Stop-Service -Name $serviceName -Force -ErrorAction Stop
-                Start-Sleep -Seconds 1
-            } catch {
-                Write-Warning ("Failed to stop service $serviceName")
-            }
-        }
-    }
-
     # Kill any running backend.exe processes (best-effort)
     $procs = Get-Process -Name 'backend' -ErrorAction SilentlyContinue
     if ($procs) {
@@ -63,6 +49,32 @@ try {
 
     # Attempt to remove all files in the publish directory (keep the folder itself)
     try {
+        Write-Host ("Preparing to remove contents of publish folder: " + $PublishDir)
+
+        # SAFETY: If a database file exists in the publish dir, back it up to the parent folder
+        try {
+            $dbPattern = 'workhour.db*'
+            $dbFiles = Get-ChildItem -Path $PublishDir -Filter $dbPattern -File -ErrorAction SilentlyContinue
+            if ($dbFiles -and $dbFiles.Count -gt 0) {
+                $parentDir = Split-Path -Parent $PublishDir
+                $backupRoot = Join-Path $parentDir 'db-backups'
+                $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+                $backupDir = Join-Path $backupRoot $timestamp
+                try {
+                    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+                    foreach ($dbf in $dbFiles) {
+                        $dest = Join-Path $backupDir $dbf.Name
+                        Copy-Item -Path $dbf.FullName -Destination $dest -Force
+                        Write-Host "Backed up $($dbf.Name) -> $dest"
+                    }
+                } catch {
+                    Write-Warning "Failed to backup database files before cleaning publish dir: $_"
+                }
+            }
+        } catch {
+            Write-Warning "Error while attempting to locate/copy DB files: $_"
+        }
+
         Write-Host ("Removing contents of publish folder: " + $PublishDir)
         Get-ChildItem -Path $PublishDir -Force | Remove-Item -Recurse -Force -ErrorAction Stop
     } catch {
@@ -95,6 +107,48 @@ foreach ($f in $filesToCopy) {
     }
 }
 
+# RESTORE: If we backed up DB files earlier, restore the latest backup's workhour.db* files into the publish folder.
+try {
+    $parentDir = Split-Path -Parent $PublishDir
+    $backupRoot = Join-Path $parentDir 'db-backups'
+    if (Test-Path $backupRoot) {
+        $latestBackup = Get-ChildItem -Path $backupRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        if ($latestBackup) {
+            $backupDbFiles = Get-ChildItem -Path $latestBackup.FullName -Filter 'workhour.db*' -File -ErrorAction SilentlyContinue
+            if ($backupDbFiles -and $backupDbFiles.Count -gt 0) {
+                foreach ($dbf in $backupDbFiles) {
+                    try {
+                        Copy-Item -Path $dbf.FullName -Destination (Join-Path $PublishDir $dbf.Name) -Force
+                        Write-Host "Restored $($dbf.Name) -> $PublishDir"
+                    } catch {
+                        Write-Warning "Failed to restore $($dbf.Name) from backup: $_"
+                    }
+                }
+            }
+        }
+    }
+} catch {
+    Write-Warning "Error while attempting to restore DB files from backups: $_"
+}
+
+# If no backup files were restored, ensure any DB files from the backend source folder are copied across (shm/wal/bak if present)
+try {
+    $expectedDbFiles = @('workhour.db','workhour.db-shm','workhour.db-wal','workhour.db.bak')
+    foreach ($f in $expectedDbFiles) {
+        $src = Join-Path $backendDir $f
+        if (Test-Path $src) {
+            try {
+                Copy-Item -Path $src -Destination $PublishDir -Force
+                Write-Host "Copied $f to publish folder (from backend source)"
+            } catch {
+                Write-Warning ("Failed to copy {0}: {1}" -f $f, $_)
+            }
+        }
+    }
+} catch {
+    Write-Warning "Error while attempting to copy DB files from backend source: $_"
+}
+
 # Create a simple start script in the publish folder to run the exe
 $exeName = 'backend.exe'
 $startScriptPath = Join-Path $PublishDir 'start-backend.ps1'
@@ -118,54 +172,3 @@ Write-Host ("Wrote start script: " + $startScriptPath)
 
 Write-Host ("Publish complete. You can test by running:`n  PowerShell -ExecutionPolicy Bypass -File " + $startScriptPath) -ForegroundColor Green
 Write-Host "To run at system startup, create a Scheduled Task or register a Windows Service that runs the start script or the exe." -ForegroundColor Yellow
-
-# Temporarily commenting out Windows Service registration; can be done manually via RegisterToService.ps1
-
-# # --- Windows Service registration (idempotent) ---
-# $serviceName = 'MISCMBackend'
-# $displayName = 'MISCM Factory Backend'
-# $exePath = Join-Path $PublishDir $exeName   # e.g. E:\MISCMFactoryService\backend\backend.exe
-
-# # Stop / remove existing service if present
-# $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-# if ($svc) {
-#     if ($svc.Status -ne 'Stopped') {
-#         Write-Host ("Stopping existing service " + $serviceName + "...")
-#         Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-#         Start-Sleep -Seconds 1
-#     }
-#     Write-Host ("Deleting existing service " + $serviceName + "...")
-#     sc.exe delete $serviceName | Out-Null
-#     Start-Sleep -Seconds 1
-# }
-
-# # Create service (runs as LocalSystem). Use obj= '<DOMAIN\\User>' and password= '...' to run under a specific account.
-# $displayNameArg = 'DisplayName= "' + $displayName + '"'
-
-# # Build a binPath that launches the backend.exe directly with a --port argument.
-# # sc.exe expects the entire binPath value to be quoted, e.g. binPath= "C:\path\backend.exe --port=5080"
-# $fullCmd = $exePath + ' --port ' + $AspDotNetCorePort
-# $binPathArg = 'binPath= "' + $fullCmd + '"'
-
-# # Build argument lists and call sc.exe via Start-Process to avoid PowerShell parsing/quoting issues
-# $createArgs = @('create', $serviceName, $binPathArg, 'start= auto', $displayNameArg, 'obj= LocalSystem')
-# Write-Host ("Creating service with command: sc.exe " + ($createArgs -join ' '))
-# $proc = Start-Process -FilePath 'sc.exe' -ArgumentList $createArgs -NoNewWindow -Wait -PassThru
-# if ($proc.ExitCode -ne 0) {
-#     Write-Warning "sc.exe create returned exit code $($proc.ExitCode)"
-# }
-
-# # Optional: set a friendly description
-# $descArgs = @('description', $serviceName, 'Backend for MISCM Factory Service (self-contained)')
-# Start-Process -FilePath 'sc.exe' -ArgumentList $descArgs -NoNewWindow -Wait | Out-Null
-
-# # Optional: set simple failure/recovery policy (restart on first/second failure after 5s)
-# # Format: actions= restart/<milliseconds>/restart/<milliseconds>/restart/<milliseconds>  (must include spaces after =)
-# $failureArgs = @('failure', $serviceName, 'reset= 86400', 'actions= restart/5000/restart/5000/restart/5000')
-# Start-Process -FilePath 'sc.exe' -ArgumentList $failureArgs -NoNewWindow -Wait | Out-Null
-
-# # Start the service
-# Write-Host ("Starting service " + $serviceName)
-# Start-Service -Name $serviceName
-# Start-Sleep -Seconds 2
-# Get-Service -Name $serviceName | Select-Object Name, Status, StartType | Format-List
