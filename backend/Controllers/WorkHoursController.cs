@@ -616,6 +616,9 @@ namespace backend.Controllers
             if (dto.ProcessEngineer != null) nt.ProcessEngineer = dto.ProcessEngineer;
             // Update CallingContent when provided
             if (dto.CallingContent != null) nt.CallingContent = dto.CallingContent;
+            // Update CallType and Actions when provided
+            if (dto.CallType != null) nt.CallType = dto.CallType;
+            if (dto.Actions != null) nt.Actions = dto.Actions;
             if (!string.IsNullOrWhiteSpace(dto.State)) nt.State = dto.State;
 
             if (dto.StartTime.HasValue) nt.StartTime = dto.StartTime.Value;
@@ -627,8 +630,8 @@ namespace backend.Controllers
             }
             else
             {
-                // fall back to recompute NcmHours from timestamps if not provided
-                nt.NcmHours = (dto.EndTime.Value - dto.StartTime.Value).TotalHours;
+                // fall back to recompute NcmHours from the current entity timestamps if not provided
+                nt.NcmHours = (nt.EndTime - nt.StartTime).TotalHours;
             }
 
             // validate timestamps
@@ -1292,6 +1295,8 @@ namespace backend.Controllers
             public string? ProcessEngineer { get; set; }
             // Modern NCM text property
             public string? CallingContent { get; set; }
+            public string? CallType { get; set; }
+            public string? Actions { get; set; }
             public string? State { get; set; }
             // allow updating the timestamps from the UI
             public DateTime? StartTime { get; set; }
