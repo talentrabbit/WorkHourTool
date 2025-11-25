@@ -148,6 +148,8 @@ namespace backend.Controllers
                 EndTime = dto.EndTime,
                 ProductId = product.Id
             };
+            // Store location if provided
+            if (!string.IsNullOrWhiteSpace(dto.Location)) workHour.Location = dto.Location;
             db.WorkHours.Add(workHour);
             db.SaveChanges();
 
@@ -498,6 +500,7 @@ namespace backend.Controllers
                     SerialNo = w.Product != null ? w.Product.SerialNo : null,
                     SystemType = w.Product != null ? w.Product.SystemType : null,
                     WorkerName = w.WorkerName,
+                    Location = w.Location,
                     ProcessName = w.ProcessName,
                     EffectiveHours = w.EffectiveHours,
                     PlannedHours = w.PlannedHours,
@@ -564,6 +567,9 @@ namespace backend.Controllers
             }
             // support state update
             if (!string.IsNullOrWhiteSpace(dto.State)) wh.State = dto.State;
+
+            // support Location update (allow explicit empty string to clear)
+            if (dto.Location != null) wh.Location = dto.Location;
 
             if (dto.StartTime.HasValue) wh.StartTime = dto.StartTime.Value;
             if (dto.EndTime.HasValue) wh.EndTime = dto.EndTime.Value;
@@ -1261,6 +1267,8 @@ namespace backend.Controllers
 
             // New flag: when true, front-end requests informing production manager
             public bool IfToInformProductionManager { get; set; } = false;
+            // Optional location information (physical or logical place)
+            public string? Location { get; set; }
         }
 
         public class CompleteWorkHourRequest
@@ -1287,6 +1295,8 @@ namespace backend.Controllers
             public string? State { get; set; }
             public DateTime? StartTimeActual { get; set; }
             public DateTime? EndTimeActual { get; set; }
+            // allow updating Location
+            public string? Location { get; set; }
         }
 
         public class UpdateNcmTimeDto

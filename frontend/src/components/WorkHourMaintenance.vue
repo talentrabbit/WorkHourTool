@@ -38,6 +38,7 @@
             <option value="">All States</option>
             <option v-for="s in workHourStates" :key="s" :value="s">{{ s }}</option>
           </select>
+          <input v-model="whFilter.location" placeholder="Location" class="filter-input" />
           <label class="filter-input">Start From: <input type="date" v-model="whFilter.startFrom" /></label>
           <label class="filter-input">Start To: <input type="date" v-model="whFilter.startTo" /></label>
           <button @click.stop="clearWhFilters">Clear</button>
@@ -68,6 +69,12 @@
                   <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
                 </select>
               </template>
+            </template>
+          </vxe-column>
+
+          <vxe-column field="location" title="Location" width="200">
+            <template #default="{ row }">
+              <input type="text" v-model="row.location" class="cell-input" @input="() => markChanged('wh', row.id)" />
             </template>
           </vxe-column>
 
@@ -205,7 +212,7 @@ const selected = reactive({ wh: new Set(), ncm: new Set() })
 const changed = reactive({ wh: new Set(), ncm: new Set() })
 
 // filters
-const whFilter = reactive({ serialNo: '', workerName: '', processName: '', state: '', startFrom: '', startTo: '' })
+const whFilter = reactive({ serialNo: '', workerName: '', processName: '', state: '', startFrom: '', startTo: '', location: '' })
 const ncmFilter = reactive({ serialNo: '', processEngineer: '', processName: '', startFrom: '', startTo: '' })
 // filter panel open flags
 const filterOpen = ref({ wh: true, ncm: true })
@@ -268,6 +275,7 @@ function clearWhFilters(){
   whFilter.state = ''
   whFilter.startFrom = ''
   whFilter.startTo = ''
+  whFilter.location = ''
 }
 function clearNcmFilters(){
   ncmFilter.serialNo = ''
@@ -291,6 +299,7 @@ const filteredWorkHours = computed(() => {
     if (whFilter.workerName && r.workerName !== whFilter.workerName) return false
     if (whFilter.processName && r.processName !== whFilter.processName) return false
     if (whFilter.state && r.state !== whFilter.state) return false
+    if (whFilter.location && !((r.location || '').toLowerCase().includes(whFilter.location.toLowerCase()))) return false
     if (from){ const st = r.startTime ? new Date(r.startTime) : null; if (!st || st < from) return false }
     if (to){ const st = r.startTime ? new Date(r.startTime) : null; if (!st || st > new Date(to.getFullYear(), to.getMonth(), to.getDate(),23,59,59,999)) return false }
     return true

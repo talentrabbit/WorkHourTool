@@ -13,6 +13,7 @@ namespace backend.Data
         public DbSet<NcmTime> NcmTimes { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<WorkSession> WorkSessions { get; set; }
+    public DbSet<Order> Orders { get; set; }
 
         //overwritten by appsettings.json if present
         public static string DbProvider { get; set; } = "sqlite";
@@ -91,12 +92,33 @@ namespace backend.Data
                 .WithMany(p => p.NcmTimes)
                 .HasForeignKey(n => n.ProductId);
 
+                                    // Orders: linked one-to-one to Product by SerialNo string (principal key)
+                        modelBuilder.Entity<Order>(eb =>
+                        {
+                                eb.HasKey(o => o.Id);
+                                eb.Property(o => o.Id).ValueGeneratedOnAdd();
+                                eb.Property(o => o.SerialNo).HasMaxLength(100);
+                                            // enforce one order per product by making SerialNo unique on Orders
+                                            eb.HasIndex(o => o.SerialNo).IsUnique();
+                                eb.HasIndex(o => o.OrderNumber).IsUnique();
+                                eb.Property(o => o.Customer).HasMaxLength(200);
+                                eb.Property(o => o.ProvinceCity).HasMaxLength(200);
+                                eb.Property(o => o.Address).HasMaxLength(500);
+                                eb.Property(o => o.DeliveryDate).HasColumnType("TEXT");
+
+                                            eb.HasOne(o => o.Product)
+                                                .WithOne(p => p.Order)
+                                                .HasPrincipalKey<Product>(p => p.SerialNo)
+                                                .HasForeignKey<Order>(o => o.SerialNo);
+                        });
+
             // Ensure State column exists and has default value
             modelBuilder.Entity<WorkHour>(eb =>
             {
                 eb.Property(w => w.State).HasMaxLength(50).HasDefaultValue("NotStarted");
                 eb.Property(w => w.StartTimeActual).HasDefaultValueSql("CURRENT_TIMESTAMP");
                 eb.Property(w => w.EndTimeActual).HasDefaultValueSql("NULL");
+                eb.Property(w => w.Location).HasMaxLength(200);
             });
 
             modelBuilder.Entity<NcmTime>(eb =>

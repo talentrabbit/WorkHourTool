@@ -34,9 +34,14 @@
       </router-link>
 
       <!-- New: KanBan (in construction) -->
-      <router-link to="/kanban" class="entry-link attention">
+      <!-- <router-link to="/kanban" class="entry-link attention">
         <span class="icon">📋</span>
         <span class="link-text">KanBan</span>
+      </router-link> -->
+
+      <router-link v-if="isAdmin" to="/OrderInfo" class="entry-link attention">
+        <span class="icon">📦</span>
+        <span class="link-text">OrderInfo</span>
       </router-link>
     </div>
   </div>
