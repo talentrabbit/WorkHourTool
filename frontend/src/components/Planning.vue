@@ -51,7 +51,6 @@
               <option v-for="proc in processNames" :key="proc" :value="proc">{{ proc }}</option>
             </select>
           </div>
-          <!-- Co-worker occupies left column; spacer forces Start Date to next row -->
           <div>
             <label>Co-worker (optional)</label>
             <select v-model="task.coWorkerName">
@@ -59,7 +58,11 @@
               <option v-for="name in coWorkerOptions" :key="name" :value="name">{{ name }}</option>
             </select>
           </div>
-          <div class="grid-spacer" aria-hidden="true"></div>
+          <div>
+            <label>Location (optional)</label>
+            <input v-model="task.location" placeholder="e.g. Line A / Station 3" />
+          </div>
+          <!-- spacer removed: layout now uses Co-worker + Location as two columns -->
           <div>
             <label>Start Date</label>
             <input type="date" v-model="task.startDate" />
@@ -135,7 +138,11 @@
             <vxe-column field="projectNo" title="ProjectNo" width="120" />
             <vxe-column field="systemType" title="SystemType" width="120" />
             <vxe-column field="productionState" title="State" width="150" />
-            <vxe-column field="workHourOverall" title="WorkHour" width="150" />
+            <vxe-column field="workHourOverall" title="WorkHour" width="150">
+              <template #default="{ row }">
+                <div>{{ (Number(row.workHourOverall) || 0).toFixed(2) }}</div>
+              </template>
+            </vxe-column>
             <vxe-column field="ncmTimeOverall" title="NCMTime" width="150" />
           </vxe-table>
         </div>
@@ -166,8 +173,12 @@
             <option v-for="name in coWorkerOptionsNon" :key="name" :value="name">{{ name }}</option>
           </select>
         </div>
+          <div>
+            <label>Location (optional)</label>
+            <input type="text" v-model="nonProductTask.location" placeholder="e.g. Line A / Station 3" />
+          </div>
 
-        <div class="grid-spacer" aria-hidden="true"></div>
+  <!-- spacer removed: non-product layout uses Co-worker + Location as two columns -->
         <div>
           <label>Start Date</label>
           <input type="date" v-model="nonProductTask.startDate" />
@@ -243,6 +254,7 @@ const task = ref({
   workerName: '',
   process: '',
   coWorkerName: '',
+  location: '',
   startDate: '',
   endDate: '',
   startTime: '',
@@ -267,6 +279,7 @@ const nonProductTask = ref({
   workerName: '',
   process: '',
   coWorkerName: '',
+  location: '',
   startDate: '',
   endDate: '',
   startTime: '',
@@ -299,6 +312,7 @@ function resetNonProductDefaults() {
   nonProductTask.value.endDate = tomorrow
   nonProductTask.value.startTime = '08:45'
   nonProductTask.value.endTime = '16:45'
+  nonProductTask.value.location = ''
 }
 
 function resetProductDefaults() {
@@ -307,6 +321,7 @@ function resetProductDefaults() {
   task.value.endDate = tomorrow
   task.value.startTime = '08:45'
   task.value.endTime = '16:45'
+  task.value.location = ''
 }
 
 // detect whether the selected date range spans a weekend (Sat or Sun)
@@ -730,6 +745,7 @@ async function assignTask() {
         SerialNo: product.value.serialNo,
         WorkerName: task.value.workerName,
         ProcessName: task.value.process,
+          Location: task.value.location,
         Hours: hoursForDay,
         StartTime: sStr,
         EndTime: eStr
@@ -766,6 +782,7 @@ async function assignTask() {
           SerialNo: product.value.serialNo,
           WorkerName: task.value.coWorkerName,
           ProcessName: task.value.process,
+          Location: task.value.location,
           Hours: hoursForDay,
           StartTime: sStr,
           EndTime: eStr
@@ -907,6 +924,7 @@ async function assignNonProductTask() {
         SerialNo: '999999', // Non-Product placeholder
         WorkerName: nonProductTask.value.workerName,
         ProcessName: nonProductTask.value.process,
+        Location: nonProductTask.value.location,
         Hours: hoursForDay,
         StartTime: sStr,
         EndTime: eStr
@@ -961,6 +979,7 @@ async function assignNonProductTask() {
           SerialNo: '999999',
           WorkerName: nonProductTask.value.coWorkerName,
           ProcessName: nonProductTask.value.process,
+          Location: nonProductTask.value.location,
           Hours: hoursForDay,
           StartTime: sStr,
           EndTime: eStr
@@ -1038,9 +1057,9 @@ async function assignNonProductTask() {
 .current-state { font-size: 1.1em; color: #EC6602; font-weight: 700; }
 .assign-section { margin-top: 2vw; background: #FFF6EE; border: 1px solid #f2c7a6; border-radius: 12px; padding: 1.5vw 1vw 1vw 1vw; box-shadow: 0 2px 10px rgba(236,102,2,0.08); }
 .assign-section h4 { margin-bottom: 1vw; font-size: 1.1em; color: #EC6602; }
-.assign-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1vw 2vw; align-items: end; margin-bottom: 1vw; }
-.assign-grid label { display: block; margin-bottom: 0.3vw; font-weight: 600; color: #8a4b22; }
-.assign-grid input, .assign-grid select { width: 100%; padding: 0.5vw; border-radius: 8px; border: 1px solid #f2c7a6; font-size: 1em; background: #fff; box-shadow: inset 0 1px 2px rgba(0,0,0,0.04); }
+.assign-grid { display: grid; /* Adjusted to eliminate overflow: two equal columns minus gap */ grid-template-columns: calc(50% - 1vw) calc(50% - 1vw); gap: 1vw 2vw; align-items: end; margin-bottom: 1vw; }
+.assign-grid label { display: block; margin-bottom: 6px; font-weight: 600; color: #8a4b22; }
+.assign-grid input, .assign-grid select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #f2c7a6; font-size: 1rem; background: #fff; box-shadow: inset 0 1px 2px rgba(0,0,0,0.04); box-sizing: border-box; }
 /* New spacer to keep grid alignment while moving Start Date to the next row */
 .assign-grid .grid-spacer { visibility: hidden; }
 /* Removed: .full-row and manual width hacks to ensure equal column widths */

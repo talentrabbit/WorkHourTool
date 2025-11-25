@@ -51,29 +51,7 @@ try {
     try {
         Write-Host ("Preparing to remove contents of publish folder: " + $PublishDir)
 
-        # SAFETY: If a database file exists in the publish dir, back it up to the parent folder
-        try {
-            $dbPattern = 'workhour.db*'
-            $dbFiles = Get-ChildItem -Path $PublishDir -Filter $dbPattern -File -ErrorAction SilentlyContinue
-            if ($dbFiles -and $dbFiles.Count -gt 0) {
-                $parentDir = Split-Path -Parent $PublishDir
-                $backupRoot = Join-Path $parentDir 'db-backups'
-                $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-                $backupDir = Join-Path $backupRoot $timestamp
-                try {
-                    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-                    foreach ($dbf in $dbFiles) {
-                        $dest = Join-Path $backupDir $dbf.Name
-                        Copy-Item -Path $dbf.FullName -Destination $dest -Force
-                        Write-Host "Backed up $($dbf.Name) -> $dest"
-                    }
-                } catch {
-                    Write-Warning "Failed to backup database files before cleaning publish dir: $_"
-                }
-            }
-        } catch {
-            Write-Warning "Error while attempting to locate/copy DB files: $_"
-        }
+        # Note: skipping automatic backup of workhour.db in the publish folder to avoid locking/cleanup complications.
 
         Write-Host ("Removing contents of publish folder: " + $PublishDir)
         Get-ChildItem -Path $PublishDir -Force | Remove-Item -Recurse -Force -ErrorAction Stop

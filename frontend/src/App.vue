@@ -23,7 +23,9 @@
           <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
           <router-link v-if="isProcess || isAdmin" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
           <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Maintenance</router-link>
-          <router-link v-if="isAdmin || isManager" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
+          <!-- Kanban entry hidden while feature is under construction -->
+          <router-link v-if="false" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
+          <router-link v-if="isAdmin || isManager" to="/orders" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Order Info</router-link>
         </nav>
       </aside>
       <main class="portal-content">
@@ -206,10 +208,11 @@ onMounted(async () => {
 /* Root: fill width, allow page-level scrolling (no inner scrollbars) */
 .portal {
   width: 100vw;
-  max-width: 1920px; /* fill full screen width */
+  max-width: 100%; /* fill full screen width */
   min-height: 100vh; /* at least viewport height; grows with content */
   height: auto; /* allow natural growth so page scroll is used */
-  margin: 0% auto;
+  margin: 0;
+  padding-left: 12px; /* keep a small left gutter so content isn't flush against the window */
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);

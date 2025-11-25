@@ -45,12 +45,12 @@
     <div v-if="modalOpen" class="modal-overlay" @click.self="closeEditor">
       <div class="modal">
         <div class="modal-header">
-          <div>
-            <div class="serial">SerialNo: <strong>{{ productBrief.serialNo || editing.serialNo }}</strong></div>
-            <div class="brief">ProductLine: <strong>{{ productBrief.productLine || '-' }}</strong> · SystemType: <strong>{{ productBrief.systemType || editing.systemType || '-' }}</strong></div>
-          </div>
-          <button class="close-btn" @click="closeEditor">×</button>
-        </div>
+              <div class="modal-title-block">
+                <div class="serial">SerialNo: <strong>{{ productBrief.serialNo || editing.serialNo }}</strong></div>
+                <div class="brief">ProductLine: <strong>{{ productBrief.productLine || '-' }}</strong> · SystemType: <strong>{{ productBrief.systemType || editing.systemType || '-' }}</strong></div>
+              </div>
+              <button class="close-btn" @click="closeEditor">×</button>
+            </div>
 
         <div class="modal-body">
           <div class="form-row" v-if="showAll">
@@ -100,9 +100,15 @@
           </div>
         </div>
 
+        <!-- Compact badge-style hint for missing/invalid fields -->
+        <div v-if="missingFields.length" class="modal-warning-badge" :title="missingFields.join(', ')" role="status" aria-live="polite">
+          <span class="badge-icon" aria-hidden="true">⚠</span>
+          <span class="badge-text">Missing: {{ missingFields.join(', ') }}</span>
+        </div>
+
         <div class="modal-footer">
           <button class="secondary" @click="closeEditor">Cancel</button>
-          <button @click="saveEditor">Save</button>
+          <button :disabled="!isEditorValid" @click="saveEditor" :title="isEditorValid ? 'Save' : 'Complete required fields to enable Save'" aria-disabled="{{ !isEditorValid }}">Save</button>
         </div>
       </div>
     </div>
@@ -240,7 +246,55 @@ async function fetchProductBrief(serial) {
   }
 }
 
+// Provide a human-friendly list of missing/invalid fields for the modal editor
+const missingFields = computed(() => {
+  const e = editing.value || {}
+  const required = [
+    { key: 'processName', label: 'Process Name' },
+    { key: 'callType', label: 'Call Type' },
+    { key: 'actions', label: 'Actions' },
+    { key: '_startLocal', label: 'Start' },
+    { key: '_endLocal', label: 'End' },
+    { key: 'ncmHours', label: 'NCM Hours' },
+    { key: 'state', label: 'State' },
+    { key: 'callingContent', label: 'Content' }
+  ]
+
+  const out = []
+  for (const f of required) {
+    const v = e[f.key]
+    if (v === undefined || v === null) { out.push(f.label); continue }
+    if (typeof v === 'string' && v.trim() === '') { out.push(f.label); continue }
+  }
+
+  // ncmHours must be numeric
+  if (!(e.ncmHours !== undefined && e.ncmHours !== null && !isNaN(Number(e.ncmHours)))) {
+    if (!out.includes('NCM Hours')) out.push('NCM Hours')
+  }
+
+  // start/end validity: require parsable times and end > start
+  if (e._startLocal && e._endLocal) {
+    const s = new Date(fromLocalInput(e._startLocal))
+    const en = new Date(fromLocalInput(e._endLocal))
+    if (isNaN(s.getTime()) || isNaN(en.getTime()) || en <= s) {
+      out.push('Start/End (End must be after Start)')
+    }
+  } else {
+    // if either is missing, the generic presence checks above will have already added them
+  }
+
+  return out
+})
+
+// editor is valid when there are no missing/invalid fields
+const isEditorValid = computed(() => (missingFields.value.length === 0))
+
 async function saveEditor() {
+  if (!isEditorValid.value) {
+    alert('Please complete all required fields in the editor. Ensure Start is before End and numeric Hours is provided.')
+    return
+  }
+
   const row = editing.value
   const payload = {
     StartTime: fromLocalInput(row._startLocal),
@@ -354,16 +408,28 @@ button:hover { opacity: 0.95 }
 /* Modal styles */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal { width: min(900px, 92vw); max-height: 86vh; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
-.modal-header { display: flex; align-items: center; justify-content: space-between; background: #FFF4E6; padding: 12px 16px; border-bottom: 1px solid #f1dfd1; }
+.modal-header { position: relative; background: #FFF4E6; padding: 14px 18px; border-bottom: 1px solid #f1dfd1; min-height: 45px; }
+.modal-header .modal-title-block { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; max-width: calc(100% - 140px); padding: 0 12px; line-height: 1.1; }
 .modal-header .serial { font-size: 1rem; color: #6a3a12; }
 .modal-header .brief { font-size: 0.9rem; color: #8a4b1a; margin-top: 2px; }
-.close-btn { background: transparent; color: #8a4b1a; font-size: 22px; line-height: 1; padding: 4px 8px; border-radius: 6px; }
-.close-btn:hover { background: rgba(0,0,0,0.06); }
-.modal-body { padding: 14px 16px; overflow: auto; }
+.modal-header .close-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; color: #8a4b1a; font-size: 22px; line-height: 1; padding: 4px 8px; border-radius: 6px; }
+.modal-header .close-btn:hover { background: rgba(0,0,0,0.06); }
+.modal-body { padding: 14px 16px; overflow: auto; font-weight: 400; }
 .form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-.form-row > label { font-weight: 600; color: #5b3312; }
+.form-row > label { font-weight: 400; color: #5b3312; }
 .form-row > input, .form-row > select, .form-row > textarea { border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; }
 .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; border-top: 1px solid #eee; }
 .modal-footer .secondary { background: #e6e6e6; color: #333; }
+/* disabled save button appearance */
+.modal-footer button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Warning block shown when required fields are missing or invalid */
+.modal-warning-badge { display: inline-flex; align-items: center; gap: 8px; background: #fff6f0; color: #6a3a12; border: 1px solid #f2c5a8; padding: 4px 8px; border-radius: 999px; font-size: 0.88rem; max-width: 62%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 6px 12px; }
+.modal-warning-badge .badge-icon { font-size: 1rem; line-height: 1; }
+.modal-warning-badge .badge-text { display: inline-block; overflow: hidden; text-overflow: ellipsis; }
 </style>

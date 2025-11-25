@@ -20,5 +20,7 @@ namespace backend.DbModel
         public string? WorkingProcess { get; set; }
         public ICollection<WorkHour> WorkHours { get; set; } = new List<WorkHour>();
         public ICollection<NcmTime> NcmTimes { get; set; } = new List<NcmTime>();
+        // New: single order associated with this product (one-to-one via SerialNo)
+        public Order? Order { get; set; }
     }
 }
