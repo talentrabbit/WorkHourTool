@@ -65,7 +65,7 @@ class ImportCsvToSQLite
                     existing.ValidationHours = rec.ValidationHours;
                     existing.DisassemblyHours = rec.DisassemblyHours;
                     existing.RepackageHours = rec.RepackageHours;
-                    existing.WorkingProcess = rec.WorkingProcess;
+                    existing.SystemState = rec.SystemState;
                     Console.WriteLine($"Updated existing product: SerialNo={rec.SerialNo}");
                 }
                 else
@@ -84,7 +84,7 @@ class ImportCsvToSQLite
                         ValidationHours = rec.ValidationHours,
                         DisassemblyHours = rec.DisassemblyHours,
                         RepackageHours = rec.RepackageHours,
-                        WorkingProcess = rec.WorkingProcess
+                        SystemState = rec.SystemState
                     });
                     Console.WriteLine($"Added new product: SerialNo={rec.SerialNo}");
                 }
@@ -195,7 +195,7 @@ class ImportCsvToSQLite
         public int ValidationHours { get; set; }
         public int DisassemblyHours { get; set; }
         public int RepackageHours { get; set; }
-        public string WorkingProcess { get; set; }
+    public string SystemState { get; set; }
     }
 
     public class NcmTimeCsv

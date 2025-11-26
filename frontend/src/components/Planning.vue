@@ -502,16 +502,16 @@ async function fetchAllProducts() {
       // exclude the placeholder non-product record (SerialNo '999999') so it doesn't appear in All Products
       const items = res.data.filter(p => {
         const sn = (p.serialNo ?? p.SerialNo ?? '').toString()
-        const systemProcess = (p.workingProcess ?? p.WorkingProcess ?? '').toString().toLowerCase()
-        // also exclude any items marked as 'Delivered' in WorkingProcess
+        const systemProcess = (p.systemState ?? p.SystemState ?? '').toString().toLowerCase()
+        // also exclude any items marked as 'Delivered' in SystemState
         return sn !== '999999' && systemProcess !== 'delivered'
       })
       allProducts.value = items.map(p => ({
         serialNo: p.serialNo ?? p.SerialNo,
         projectNo: p.projectNo ?? p.ProjectNo,
         systemType: p.systemType ?? p.SystemType,
-        // The backend now returns a computed `productionState` (earliest non-NotStarted WorkHour process)
-        productionState: p.productionState ?? p.workingProcess ?? p.WorkingProcess,
+      // Use the stored SystemState on the Product record (prefer camelCase then PascalCase)
+    productionState: p.systemState ?? p.SystemState ?? '',
         workHourOverall: p.workHourOverall ?? p.WorkHourOverall ?? 0,
         ncmTimeOverall: p.ncmTimeOverall ?? p.NcmTimeOverall ?? 0
       }))
