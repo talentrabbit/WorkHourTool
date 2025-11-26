@@ -17,7 +17,8 @@ namespace backend.DbModel
         public int ValidationHours { get; set; }
         public int DisassemblyHours { get; set; }
         public int RepackageHours { get; set; }
-        public string? WorkingProcess { get; set; }
+        // Previously named "WorkingProcess"; renamed to "SystemState" to match DB column rename
+        public string? SystemState { get; set; }
         public ICollection<WorkHour> WorkHours { get; set; } = new List<WorkHour>();
         public ICollection<NcmTime> NcmTimes { get; set; } = new List<NcmTime>();
         // New: single order associated with this product (one-to-one via SerialNo)

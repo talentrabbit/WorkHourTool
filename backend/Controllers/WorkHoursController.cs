@@ -274,14 +274,8 @@ namespace backend.Controllers
                     SerialNo = p.SerialNo,
                     ProjectNo = p.ProjectNo,
                     SystemType = p.SystemType,
-                    // Compute the production state as the latest (by StartTime DESC) WorkHour.ProcessName
-                    // where the WorkHour.State is not 'Completed' (i.e. still in-progress or other non-completed states).
-                    // If no working item, it should be treated as 'Finished'.
-                    ProductionState = db.WorkHours
-                        .Where(wh => wh.ProductId == p.Id)
-                        .OrderByDescending(wh => wh.StartTime)
-                        .FirstOrDefault(wh => wh.State != "Completed")
-                        ?.ProcessName ?? "Finished",
+                    // Return the stored SystemState from the Product record. Front-end will read systemState/SystemState.
+                    SystemState = p.SystemState,
                     WorkHourOverall = db.WorkHours
                         .Where(wh => wh.ProductId == p.Id)
                         .Sum(wh => (double?)wh.EffectiveHours) ?? 0,
@@ -324,6 +318,95 @@ namespace backend.Controllers
             db.SaveChanges();
 
             return Ok(new { message = "Product added", id = p.Id, serialNo = p.SerialNo });
+        }
+
+        // ---- Products maintenance endpoints ----
+        // GET: api/WorkHours/all-products
+        [HttpGet("all-products")]
+        public IActionResult GetAllProducts()
+        {
+            try
+            {
+                var db = GetDb();
+                var list = db.Products
+                    .AsNoTracking()
+                    .OrderBy(p => p.SerialNo)
+                    .ToList();
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to fetch all products");
+                return StatusCode(500, new { message = "Failed to fetch products" });
+            }
+        }
+
+        // PUT: api/WorkHours/product/{serialNo}
+        // Updates an existing product by unique SerialNo.
+        [HttpPut("product/{serialNo}")]
+        public IActionResult UpdateProduct(string serialNo, [FromBody] Product update)
+        {
+            if (string.IsNullOrWhiteSpace(serialNo)) return BadRequest(new { message = "SerialNo is required" });
+            try
+            {
+                var db = GetDb();
+                var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
+                if (product == null) return NotFound(new { message = $"Product not found for SerialNo: {serialNo}" });
+
+                // Update editable fields (Id is not required from client)
+                product.ProjectNo = update.ProjectNo;
+                product.IvkNo = update.IvkNo;
+                product.ModalityType = update.ModalityType;
+                product.SystemType = update.SystemType;
+                product.SerialNo = update.SerialNo; // allow changing serial if needed (take care of uniqueness)
+                product.ProductLine = update.ProductLine;
+                product.UnpackageHours = update.UnpackageHours;
+                product.AssemblyHours = update.AssemblyHours;
+                product.DebugHours = update.DebugHours;
+                product.ValidationHours = update.ValidationHours;
+                product.DisassemblyHours = update.DisassemblyHours;
+                product.RepackageHours = update.RepackageHours;
+                product.SystemState = update.SystemState;
+
+                // If SerialNo changed, ensure uniqueness
+                if (!string.Equals(serialNo, product.SerialNo, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (db.Products.Any(p => p.SerialNo == product.SerialNo && p.Id != product.Id))
+                    {
+                        return Conflict(new { message = $"SerialNo '{product.SerialNo}' already exists" });
+                    }
+                }
+
+                db.SaveChanges();
+                return Ok(new { message = "Product updated", serialNo = product.SerialNo });
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to update product {SerialNo}", serialNo);
+                return StatusCode(500, new { message = "Failed to update product" });
+            }
+        }
+
+        // DELETE: api/WorkHours/product/{serialNo}
+        [HttpDelete("product/{serialNo}")]
+        public IActionResult DeleteProduct(string serialNo)
+        {
+            if (string.IsNullOrWhiteSpace(serialNo)) return BadRequest(new { message = "SerialNo is required" });
+            try
+            {
+                var db = GetDb();
+                var product = db.Products.FirstOrDefault(p => p.SerialNo == serialNo);
+                if (product == null) return NotFound(new { message = $"Product not found for SerialNo: {serialNo}" });
+
+                db.Products.Remove(product);
+                db.SaveChanges();
+                return Ok(new { message = "Product deleted", serialNo });
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to delete product {SerialNo}", serialNo);
+                return StatusCode(500, new { message = "Failed to delete product" });
+            }
         }
 
         // GET: api/WorkHours/all-worker-names

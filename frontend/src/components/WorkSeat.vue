@@ -279,7 +279,7 @@ async function startWork(){
         <div><strong>ModalityType:</strong> {{ product.modalityType || '-' }}</div>
         <div><strong>SystemType:</strong> {{ product.systemType }}</div>
         <div class="current-state" style="grid-column: 1 / span 3; text-align: center; margin-top: 0.5vw;">
-          <strong>Current State:</strong> {{ product.workingProcess || '-' }}
+          <strong>Current State:</strong> {{ product.systemState || product.SystemState || '-' }}
         </div>
       </div>
     </div>
