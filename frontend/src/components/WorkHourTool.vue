@@ -3,6 +3,10 @@ import { ref, provide, watch, computed, onMounted, onUnmounted, inject } from 'v
 import axios from 'axios'
 import WorkSeat from './WorkSeat.vue'
 import TimerClock from './TimerClock.vue'
+// Hero carousel images from src/assets so they are bundled
+import hero1 from '../assets/HeroSection/factory1.jpg?url'
+import hero2 from '../assets/HeroSection/factory2.jpg?url'
+import hero3 from '../assets/HeroSection/factory3.jpg?url'
 
 const activeTab = ref('task')
 // Shared state for timer running
@@ -17,11 +21,7 @@ const selectedSerial = ref('')
 const selectedProcess = ref('')
 const selectedWorkHourId = ref(null)
 
-const heroImages = [
-  '/HeroSection/factory1.jpg',
-  '/HeroSection/factory2.jpg',
-  '/HeroSection/factory3.jpg'
-]
+const heroImages = [hero1, hero2, hero3]
 const currentHero = ref(0)
 function nextHero() {
   currentHero.value = (currentHero.value + 1) % heroImages.length
@@ -234,7 +234,6 @@ function handleStartWork(payload) {
     <div class="nav-header">
       <!-- Removed duplicate logo -->
       <div class="nav-header-spacer"></div>
-      <!-- <img src="/title-graph.png" alt="Title Graph" class="title-graph" /> -->
     </div>
     <div class="hero-section">
       <div class="hero-carousel">

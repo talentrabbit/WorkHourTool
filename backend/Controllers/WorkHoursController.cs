@@ -489,10 +489,6 @@ namespace backend.Controllers
                         {
                             return Ok(new { backend = be.GetString() ?? string.Empty });
                         }
-                        if (root.TryGetProperty("version", out var v))
-                        {
-                            return Ok(new { backend = v.GetString() ?? string.Empty });
-                        }
                     }
                     catch
                     {
