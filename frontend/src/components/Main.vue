@@ -1,7 +1,7 @@
 <template>
   <div class="entry-container">
     <header class="hero">
-      <img src="/entry.jpg" alt="Factory Hero" class="hero-img" />
+  <img :src="entryUrl" alt="Factory Hero" class="hero-img" />
       <h1 class="hero-title">SSME MI Digital Factory</h1>
       <p class="hero-desc">Empowering production managers and workers with digital tools for efficient manufacturing.</p>
     </header>
@@ -28,7 +28,7 @@
       </router-link>
 
       <!-- New: NCM Time -->
-      <router-link v-if="isProcess || isAdmin" to="/ncm" class="entry-link attention">
+      <router-link v-if="isProcess || isAdmin || isManager" to="/ncm" class="entry-link attention">
         <span class="icon">🧾</span>
         <span class="link-text">NCM Time</span>
       </router-link>
@@ -49,6 +49,8 @@
 
 <script setup>
 import { inject, computed } from 'vue'
+// Import hero image from src/assets so Vite bundles it
+import entryUrl from '../assets/Entry.jpg?url'
 const userRole = inject('userRole') || ''
 const roleVal = computed(() => (typeof userRole === 'object' && 'value' in userRole) ? (userRole.value || '') : (userRole || ''))
 const isWorker = computed(() => roleVal.value.toLowerCase() === 'worker')

@@ -1,9 +1,9 @@
 <template>
   <div class="product-register">
-    <!-- Header: New System button (styled like Planning switch button) -->
+    <!-- Header: Add System button (styled like Planning switch button) -->
     <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
       <button class="add-nonproduct-btn switch-btn" @click="showRegisterDialog = true" aria-label="Create new system">
-        <span class="switch-label">New System</span>
+        <span class="switch-label">Register New System</span>
         <span class="forward-arrow" aria-hidden="true">+</span>
       </button>
     </div>
@@ -19,7 +19,7 @@
             <button :disabled="!selectedProducts.size" @click="deleteProducts">Delete</button>
             <button @click="loadProducts">Refresh</button>
           </div>
-          <vxe-table :data="products" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChangeProd($event)" @checkbox-all="onCheckChangeProd($event)">
+          <vxe-table :data="pagedProducts" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChangeProd($event)" @checkbox-all="onCheckChangeProd($event)">
             <vxe-column type="checkbox" width="40" />
             <vxe-column field="serialNo" title="SerialNo" width="90">
               <template #default="{ row }">
@@ -89,6 +89,14 @@
               </template>
             </vxe-column>
           </vxe-table>
+          <div class="pager" style="display:flex;align-items:center;gap:8px;margin-top:8px">
+            <button :disabled="prodPage <= 1" @click="prodPage = 1">First</button>
+            <button :disabled="prodPage <= 1" @click="prodPage = Math.max(1, prodPage-1)">Prev</button>
+            <span>Page {{ prodPage }} / {{ prodTotalPages }}</span>
+            <button :disabled="prodPage >= prodTotalPages" @click="prodPage = Math.min(prodTotalPages, prodPage+1)">Next</button>
+            <button :disabled="prodPage >= prodTotalPages" @click="prodPage = prodTotalPages">Last</button>
+            <span style="margin-left:8px;color:#666">Total: {{ products.length }}</span>
+          </div>
       </div>
     </section>
 
@@ -399,6 +407,19 @@ const changedProducts = ref(new Set())
 const showRegisterDialog = ref(false)
 const prodFilter = null // filters removed per request
 
+// Pagination for products maintenance (client-side)
+const pageSize = 10
+const prodPage = ref(1)
+const prodTotalPages = computed(() => Math.max(1, Math.ceil(products.value.length / pageSize)))
+const pagedProducts = computed(() => {
+  const arr = products.value || []
+  const start = (prodPage.value - 1) * pageSize
+  return arr.slice(start, start + pageSize)
+})
+
+// reset page when products list reloads
+watch(products, () => { prodPage.value = 1 })
+
 function onCheckChangeProd({ records }){
   const set = selectedProducts.value; set.clear(); for (const r of records) set.add(r.serialNo)
 }
@@ -467,7 +488,7 @@ async function deleteProducts(){
 </script>
 
 <style scoped>
-.product-register {   max-width: 90%; width: 75vw;   margin: 1em auto; padding: 1.2em; background: #fff; border: 1px solid #f2c7a6; border-radius: 8px; }
+.product-register { width: min(1920px, 100%); max-width: 100%; margin: 1em auto; padding: 1.2em; background: #fff; border: 1px solid #f2c7a6; border-radius: 8px; }
 .register-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; align-items: start; }
 label { font-weight: 700; color: #5a3b27; display:block; margin-bottom:0.2rem }
 .register-grid input, .register-grid select { width:100%; padding:0.4rem; border:1px solid #e6c9b0; border-radius:6px; box-sizing: border-box; font-size:0.95rem }
@@ -488,6 +509,7 @@ label { font-weight: 700; color: #5a3b27; display:block; margin-bottom:0.2rem }
 /* Maintenance styles (shared feel with WorkHourMaintenance) */
 .collapsible{ margin-top: 16px; border: 1px solid #ddd; border-radius: 6px }
 .collapsible-header{ display:flex; justify-content:space-between; padding:8px; background:#f7f7f7; cursor:pointer }
+.product-register h3, .collapsible-header h3 { font-family: 'Times New Roman', Times, serif; font-size: 0.98rem; }
 .collapsible-body{ padding:12px }
 .actions{ margin-bottom:8px }
 .filters{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap }
@@ -495,12 +517,6 @@ label { font-weight: 700; color: #5a3b27; display:block; margin-bottom:0.2rem }
 .modern-vxe-table{ font-size:13px }
 .cell-input{ width:100% }
 .eh-input{ width:70px }
-
-/* Reuse Planning-style switch button for New System */
-.switch-btn { display: inline-flex; align-items: center; gap: 0.6rem; background: linear-gradient(90deg,#FFF4EA 0%,#FFF8F2 100%); border: 1px solid #F5D3B0; padding: 0.5rem 0.8rem; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(236,102,2,0.08); }
-.switch-btn:hover { transform: translateY(-2px); }
-.switch-label { font-weight: 700; color: #6b3b1f; }
-.forward-arrow { display:inline-flex; align-items:center; justify-content:center; background: #FFF3E8; color: #EC6602; font-weight: 800; border-radius: 999px; padding: 0.25rem 0.5rem; font-size: 1.1rem; box-shadow: 0 2px 6px rgba(236,102,2,0.12); }
 
 /* Modal dialog for register form */
 .modal-overlay{

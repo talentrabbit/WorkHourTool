@@ -1,9 +1,12 @@
 <template>
   <div class="customer-page">
     <div class="page-header">
-      <h2 class="title-bright">Order Info</h2>
-      <button class="btn" @click="openCreate">Add New Order</button>
-    </div>
+        <h2>Order Info</h2>
+        <button class="add-order-btn switch-btn" @click="openCreate" aria-label="Add New Order">
+          <span class="switch-label">Add New Order</span>
+          <span class="forward-arrow" aria-hidden="true">+</span>
+        </button>
+      </div>
 
     <div v-if="loading" class="loading">Loading...</div>
     <div v-else class="table-wrap">
@@ -199,14 +202,11 @@ async function doDelete() {
 .clickable { cursor: pointer; }
 .clickable:hover { background: #fff8f1; }
 
-.title-bright {
-  color: #EC6602;
-  font-weight: 800;
-  font-size: 1.5rem; /* slightly smaller than default h1 */
-  margin: 0;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-}
+
+/* center the H2 title inside the page-header while keeping the action button on the right */
+.page-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 12px; position: relative; }
+.page-header h2 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-weight: 700; font-size: 1.2rem; font-family: 'Times New Roman', Times, serif; }
+
+/* rely on shared .switch-btn styles in src/style.css */
+.add-order-btn { margin-left: 8px; }
 </style>

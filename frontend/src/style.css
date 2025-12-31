@@ -77,3 +77,14 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Shared prominent switch button used across multiple pages (Add / Back style)
+  Reduced vertical padding to make the button shorter while keeping horizontal
+  padding for a comfortable tap target. This rule is global and will apply
+  to any sub-page that uses the `.switch-btn` class. */
+.switch-btn { display: inline-flex; align-items: center; gap: 0.5rem; background: linear-gradient(90deg,#FFF4EA 0%,#FFF8F2 100%); border: 1px solid #F5D3B0; padding: 0.32rem 0.8rem; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(236,102,2,0.08); font-size: 0.98rem; line-height: 1; }
+.switch-btn:hover { transform: translateY(-2px); }
+.switch-label { font-weight: 500; color: #6b3b1f; }
+.forward-arrow, .back-arrow { display:inline-flex; align-items:center; justify-content:center; background: #FFF3E8; color: #EC6602; font-weight: 800; border-radius: 999px; padding: 0.18rem 0.45rem; font-size: 1rem; box-shadow: 0 2px 6px rgba(236,102,2,0.12); }
+.back-btn.switch-btn { padding: 0.18rem 0.5rem; }
+

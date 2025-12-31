@@ -3,31 +3,32 @@
     <header class="portal-header">
       <div class="header-left">
         <img :src="logoUrl" alt="Company Logo" class="header-logo" />
-        <router-link to="/" :class="['home-btn', {dimmed: isCountingTimerActive}]" title="Home" aria-label="Home">🏠</router-link>
+        <router-link to="/" :class="['home-btn', {dimmed: isCountingTimerActive}]" title="Home" aria-label="Home">
+          <img :src="homeUrl" alt="Home" class="home-btn-img" />
+        </router-link>
+        <div class="header-title">SSME MI Digital Factory</div>
       </div>
-      <div class="header-title">SSME MI Digital Factory</div>
       <div class="header-right">
-        <div class="version-info" title="Frontend / Backend version">FE: {{ frontendVersion }}
+        <div class="version-info" title="Frontend / Backend version">FE: {{ frontendVersion || 'N/A' }}
           <span v-if="backendVersion"> | BE: {{ backendVersion }}</span>
         </div>
-        <div class="user-info">{{ username }}</div>
-        <button v-if="username === 'Guest'" class="signin-btn" @click="openLogon" title="Sign in">Sign in</button>
-        <button v-else class="signout-btn" @click="doSignOut" title="Sign out">Sign out</button>
+  <div class="user-info">{{ username }}</div>
+  <!-- <img :src="profileIcon" alt="Profile" :class="['profile-icon', { dimmed: username === 'Guest' }]" /> -->
+  <button v-if="username === 'Guest'" class="signin-btn" @click="openLogon" title="Sign in">Sign in</button>
+    <button v-else class="signout-btn" @click="doSignOut" title="Sign out">Sign out</button>
       </div>
     </header>
     <div class="portal-body">
-      <aside  class="portal-nav">
-        <nav>
-          <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Planning</router-link>
-          <router-link v-if="isAdmin" to="/product-register" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Products</router-link>
-          <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
-          <router-link v-if="isProcess || isAdmin" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
-          <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Maintenance</router-link>
-          <!-- Kanban entry hidden while feature is under construction -->
-          <router-link v-if="false" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
-          <router-link v-if="isAdmin || isManager" to="/orders" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Order Info</router-link>
-        </nav>
-      </aside>
+      <nav class="portal-nav">
+        <router-link v-if="isAdmin || isManager" to="/planning" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Planning</router-link>
+        <router-link v-if="isAdmin" to="/product-register" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Products</router-link>
+        <router-link v-if="isWorker || isAdmin" to="/worker" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Work Hour Tool</router-link>
+  <router-link v-if="isProcess || isAdmin || isManager" to="/ncm" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">NCM Time</router-link>
+        <router-link v-if="isAdmin || isManager" to="/maintenance" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Maintenance</router-link>
+        <!-- Kanban entry hidden while feature is under construction -->
+        <router-link v-if="false" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
+        <router-link v-if="isAdmin || isManager" to="/orders" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Order Info</router-link>
+      </nav>
       <main class="portal-content">
         <router-view />
       </main>
@@ -57,7 +58,9 @@
 <script setup>
 import { ref, onMounted, computed, provide, watch } from 'vue'
 import axios from 'axios'
-import logoUrl from '../company-logo.png?url'
+import logoUrl from './assets/company-logo.png?url'
+import homeUrl from './assets/Home.jpeg?url'
+import profileIcon from './assets/profile-icon-vector.jpg?url'
 import { useRouter } from 'vue-router'
 
 const username = ref(localStorage.getItem('username') || 'Guest')
@@ -74,7 +77,7 @@ const workerNames = ref([])
 const router = useRouter()
 
 // Frontend version provided at build time via Vite env (VITE_APP_VERSION)
-const frontendVersion = ref(import.meta.env.VITE_APP_VERSION || '')
+const frontendVersion = ref('')
 const backendVersion = ref('')
 
 // Role-derived flags
@@ -169,6 +172,7 @@ watch(username, (nv) => {
 })
 
 onMounted(async () => {
+  loadFrontendVersion()
   // trigger Negotiate handshake first (non-blocking)
   // try {
   //   await axios.get('/api/auth/challenge')
@@ -202,22 +206,39 @@ onMounted(async () => {
 
   // Frontend version is resolved at build-time; no runtime fetch needed.
 })
+
+function loadFrontendVersion() {
+  fetch('/frontend-version.xml', { cache: 'no-cache' })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const text = await res.text()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(text, 'application/xml')
+      const node = doc.querySelector('version')
+      const val = node?.textContent?.trim()
+      frontendVersion.value = val || ''
+    })
+    .catch(err => {
+      console.warn('Failed to load frontend-version.xml', err)
+      frontendVersion.value = import.meta.env.VITE_APP_VERSION || frontendVersion.value || ''
+    })
+}
 </script>
 
 <style scoped>
 /* Root: fill width, allow page-level scrolling (no inner scrollbars) */
 .portal {
   width: 100vw;
-  max-width: 100%; /* fill full screen width */
-  min-height: 100vh; /* at least viewport height; grows with content */
-  height: auto; /* allow natural growth so page scroll is used */
+  max-width: 100%;
+  min-height: 100vh;
+  height: auto;
   margin: 0;
-  padding-left: 12px; /* keep a small left gutter so content isn't flush against the window */
+  padding: 0;
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);
   box-sizing: border-box;
-  overflow: visible; /* don't trap scroll; let body handle it */
+  overflow: visible;
 }
 
 /* Header */
@@ -231,11 +252,16 @@ onMounted(async () => {
 .header-left { display: flex; align-items: center; gap: 12px; }
 .home-btn { width: var(--header-h); height: var(--header-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 28px; }
 .header-logo { height: var(--header-h); max-height: 120px; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(236,102,2,0.25)); }
+/* Home button image sizing */
+.home-btn-img { max-height: calc(var(--header-h) - 18px); max-width: calc(var(--header-h) - 18px); object-fit: contain; display: block; }
 .header-title {
-  flex: 1; /* let title take remaining space between left/right */
-  text-align: center;
-  font-size: clamp(16px, 2vw, 28px); /* responsive, capped */
-  font-weight: 800; color: #EC6602; letter-spacing: 0.02em;
+  margin-left: 8px;
+  /* keep requested compact header title style */
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+  color: #EC6602;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* prevent wrapping */
 }
 .header-right { display: flex; align-items: center; gap: 16px; }
@@ -244,20 +270,75 @@ onMounted(async () => {
 .version-info { white-space: nowrap }
 .user-info { color: #82451F; font-weight: 600; background: #FFF3E8; border: 1px solid #F2C7A6; padding: 6px 10px; border-radius: 8px; }
 .signout-btn { margin-left: 12px; background: transparent; border: 1px solid #E6C9B0; color: #82451F; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
-.signin-btn { margin-left: 12px; background: #EC6602; border: none; color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.signin-btn { margin-left: 6px; background: #EC6602; border: none; color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; }
 .signin-btn:hover { opacity: 0.95 }
+/* Profile icon next to sign-in */
+.profile-icon { width: 24px; height: 24px; object-fit: cover; border-radius: 4px; margin-left: 6px; }
+/* Dimmed appearance for guests */
+.profile-icon.dimmed { opacity: 0.45; filter: grayscale(70%); }
 
 /* Body */
-.portal-body { flex: 1; display: flex; min-height: 0; width: 100%; position: relative; }
-.portal-nav { width: 200px; min-width: 200px; background: #FFF0E4; border-right: 1px solid #F2C7A6; padding: 14px 8px; box-shadow: inset -1px 0 0 #F2C7A6; overflow-y: auto; }
-.portal-nav nav { display: flex; flex-direction: column; gap: 8px; }
-.nav-link { display: block; padding: 10px 12px; color: #82451F; text-decoration: none; border-radius: 8px; background: #FFE6D3; box-shadow: 0 1px 4px rgba(236,102,2,0.08); font-weight: 600; }
+.portal-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+}
+.portal-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px 10px;
+  background: #FFF0E4;
+  border-bottom: 1px solid #F2C7A6;
+  box-shadow: inset 0 -1px 0 #F2C7A6;
+  overflow-x: auto;
+}
+.portal-nav::-webkit-scrollbar { height: 6px; }
+.portal-nav::-webkit-scrollbar-thumb { background: rgba(236,102,2,0.4); border-radius: 999px; }
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  color: #82451F;
+  text-decoration: none;
+  border-radius: 999px;
+  background: #FFE6D3;
+  box-shadow: 0 1px 4px rgba(236,102,2,0.08);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .nav-link:hover { transform: translateY(-1px); background: #FFD9BB; }
 .nav-link.active { background: #FFFFFF; border: 1px solid #F2C7A6; color: #A64E00; }
 .nav-link.dimmed, .home-btn.dimmed { opacity: 0.45; pointer-events: none; }
 
 /* Main Content */
-.portal-content { flex: 1; min-width: 0; padding: 0px; overflow: visible; }
+.portal-content {
+  flex: 1;
+  min-width: 0;
+  padding: 16px 18px 32px;
+  overflow: visible;
+}
+
+/* Make sub-page titles a bit smaller for denser UI (apply to h2 and h3) */
+.portal-content h2, .portal-content h3 {
+  font-size: 1.1rem; /* approx 17.6px */
+  margin-top: 0.25rem;
+  margin-bottom: 0.6rem;
+  /* remove bold */
+  font-weight: 400;
+  /* WordArt-like subtle style: gradient fill + shadow + slight skew */
+  color: transparent;
+  background: linear-gradient(90deg, #EC6602 0%, #82451F 60%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: 2px 2px 0 rgba(0,0,0,0.06), 0 6px 14px rgba(0,0,0,0.08);
+  display: inline-block;
+  transform: skewX(-4deg);
+}
 
 /* Footer */
 .portal-footer { height: 40px; min-height: 40px; background: #FFFFFF; border-top: 1px solid #F2C7A6; display: flex; align-items: center; justify-content: center; color: #82451F; font-size: 0.9rem; }
@@ -274,19 +355,17 @@ onMounted(async () => {
 
 /* Responsive tweaks */
 @media (max-width: 1600px) {
-  .portal { padding: 0 8px; }
-  .portal-nav { width: 180px; min-width: 180px; }
+  .portal-nav { gap: 6px; padding: 12px 16px; }
 }
 
 @media (max-width: 1366px) {
-  .portal { padding: 0 8px; }
-  .portal-nav { width: 170px; min-width: 170px; }
+  .portal-nav { gap: 6px; padding: 10px 14px; }
   .header-logo { height: 56px; }
   .logon-modal { width: 360px }
 }
 
 @media (max-width: 1024px) {
-  .portal-nav { display: none; }
+  .portal-nav { overflow-x: scroll; }
   .portal-content { padding: 12px; }
   .header-title { font-size: 1rem; }
   .logon-modal { width: 320px }

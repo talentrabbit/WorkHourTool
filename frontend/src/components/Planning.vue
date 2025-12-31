@@ -136,8 +136,8 @@
               </template>
             </vxe-column>
             <vxe-column field="projectNo" title="ProjectNo" width="120" />
-            <vxe-column field="systemType" title="SystemType" width="120" />
-            <vxe-column field="productionState" title="State" width="150" />
+            <vxe-column field="systemType" title="SystemType" width="150" />
+            <vxe-column field="productionState" title="State" width="120" />
             <vxe-column field="workHourOverall" title="WorkHour" width="150">
               <template #default="{ row }">
                 <div>{{ (Number(row.workHourOverall) || 0).toFixed(2) }}</div>
@@ -1071,13 +1071,9 @@ async function assignNonProductTask() {
 .all-products-section { margin-top: 3vw; background: #fff; border-radius: 14px; box-shadow: 0 3px 14px rgba(236,102,2,0.12); padding: 1.5vw 1vw 2vw 1vw; border: 1px solid #f2c7a6; }
 .all-products-header { display:flex; align-items:center; justify-content:center; padding: 0.6rem 0 0.6rem 0; }
 .all-products-header h3 { margin: 0; font-size: 1.05rem; line-height: 1.4; text-align: center; }
-/* Prominent switch button shared style */
-.switch-btn { display: inline-flex; align-items: center; gap: 0.6rem; background: linear-gradient(90deg,#FFF4EA 0%,#FFF8F2 100%); border: 1px solid #F5D3B0; padding: 0.5rem 0.8rem; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(236,102,2,0.08); }
-.switch-btn:hover { transform: translateY(-2px); }
-.switch-label { font-weight: 700; color: #6b3b1f; }
-.forward-arrow, .back-arrow { display:inline-flex; align-items:center; justify-content:center; background: #FFF3E8; color: #EC6602; font-weight: 800; border-radius: 999px; padding: 0.25rem 0.5rem; font-size: 1.1rem; box-shadow: 0 2px 6px rgba(236,102,2,0.12); }
-.back-btn { background:transparent; border:none; font-size:18px; cursor:pointer; padding: 0; }
-.back-btn.switch-btn { padding: 0.2rem 0.5rem; }
+/* Use Times New Roman for main titles and collapsible headers, slightly smaller */
+.planning-container h2, .planning-container h3, .collapsible-header h3 { font-family: 'Times New Roman', Times, serif; font-size: 0.98rem; }
+/* switch button styling moved to global src/style.css */
 .non-product-panel { background: #fff; border: 1px solid #eee; padding: 1.25rem; border-radius: 8px; margin-top: 1rem; }
 .non-product-header { display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom: 0.75rem; }
 .non-product-header h3 { margin: 0; font-size: 1.05rem; line-height: 1.3; }

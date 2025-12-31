@@ -1,5 +1,26 @@
-# Vue 3 + Vite
+# Frontend
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+This folder hosts the Vue 3 + Vite UI for the WorkHour Tool. The app uses `<script setup>` SFCs and Vite for bundling.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+## Production build
+
+```bash
+npm run build
+```
+
+## Version number
+
+The header shows "FE: <version>" by fetching `public/frontend-version.xml` at runtime. To change the number (without rebuilding):
+
+1. Edit `frontend/public/frontend-version.xml`.
+2. Update the `<version>` element with the release identifier (for example `2552.301`).
+3. Deploy the updated XML alongside the built assets. The app will refetch it on the next load.
+
+If the XML is missing or malformed the UI falls back to blank/N/A, so make sure CI/CD always publishes the file.
