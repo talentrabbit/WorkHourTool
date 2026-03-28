@@ -17,7 +17,7 @@ namespace backend.DbModel
         public DateTime LastHeartbeat { get; set; } = DateTime.Now;
         // Elapsed seconds reported by client (snapshot)
         public int ElapsedSeconds { get; set; }
-        // The state of Timer or not: "active" or "pause"
+    // The state of timer: "active" or "paused"
         public string? ActiveClock { get; set; }
         // Optional JSON store for NCM rows or other metadata
         public string? MetadataJson { get; set; }
