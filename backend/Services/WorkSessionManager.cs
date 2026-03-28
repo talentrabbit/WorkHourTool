@@ -167,7 +167,7 @@ namespace backend.Services
             if (string.IsNullOrWhiteSpace(sessionId)) return false;
             if (_sessions.TryGetValue(sessionId, out var managed))
             {
-                managed.Session.ActiveClock = "pause";
+                managed.Session.ActiveClock = "paused";
                 return true;
             }
             return false;

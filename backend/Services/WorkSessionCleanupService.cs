@@ -23,8 +23,7 @@ namespace backend.Services
         private bool _enabled = true;
         private bool _restoreOnStartup = true;
         private int _restoreWindowDays = 0; // 0 => today only
-        private TimeSpan _scheduleTime = TimeSpan.Zero; // midnight
-        private TimeSpan _staleThreshold = TimeSpan.FromHours(8);
+    private TimeSpan _scheduleTime = new TimeSpan(23, 30, 0); // 23:30
 
         public WorkSessionCleanupService(ILogger<WorkSessionCleanupService> logger, WorkSessionManager manager, IConfiguration config, IServiceScopeFactory scopeFactory)
         {
@@ -41,10 +40,8 @@ namespace backend.Services
                     _enabled = section.GetValue<bool>("Enabled", true);
                     _restoreOnStartup = section.GetValue<bool>("RestoreOnStartup", true);
                     _restoreWindowDays = section.GetValue<int>("RestoreWindowDays", 0);
-                    var schedule = section.GetValue<string>("ScheduleTime", "00:00");
+                    var schedule = section.GetValue<string>("ScheduleTime", "23:30");
                     if (TimeSpan.TryParse(schedule, out var st)) _scheduleTime = st;
-                    var staleHours = section.GetValue<int>("StaleThresholdHours", 8);
-                    _staleThreshold = TimeSpan.FromHours(staleHours);
                 }
             }
             catch (Exception ex)
@@ -61,7 +58,7 @@ namespace backend.Services
                 return;
             }
 
-            _logger.LogInformation("WorkSessionCleanupService started (schedule {Schedule}, staleThresholdHours={Hours}, restoreOnStartup={Restore})", _scheduleTime, _staleThreshold.TotalHours, _restoreOnStartup);
+            _logger.LogInformation("WorkSessionCleanupService started (schedule {Schedule}, restoreOnStartup={Restore})", _scheduleTime, _restoreOnStartup);
 
             if (_restoreOnStartup)
             {
@@ -89,7 +86,7 @@ namespace backend.Services
                                     SerialNo = session.SerialNo,
                                     ProcessName = session.ProcessName,
                                     ElapsedSeconds = session.ElapsedSeconds,
-                                    ActiveClock = session.ActiveClock.ToLowerInvariant(),
+                                    ActiveClock = (session.ActiveClock ?? "paused").ToLowerInvariant(),
                                     MetadataJson = session.MetadataJson,
                                     State = session.State
                                 };
@@ -130,11 +127,15 @@ namespace backend.Services
 
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    var cutoff = DateTime.Now - _staleThreshold; // sessions with LastHeartbeat older than this are stale
-                    _logger.LogInformation("WorkSessionCleanupService running cleanup at {Now}, cutoff {Cutoff}", DateTime.Now, cutoff);
+                    var runAt = DateTime.Now;
+                    var todayStart = runAt.Date;
+                    var tomorrowStart = todayStart.AddDays(1);
+                    _logger.LogInformation("WorkSessionCleanupService running scheduled end-of-day cleanup at {Now}", runAt);
 
                     var stale = db.WorkSessions
-                        .Where(s => (s.State == "Working" || s.State == "NotStarted") && s.LastHeartbeat < cutoff)
+                        .Where(s => (s.State == "Working" || s.State == "NotStarted")
+                            && s.StartTimeActual >= todayStart
+                            && s.StartTimeActual < tomorrowStart)
                         .ToList();
 
                     if (stale.Any())
@@ -147,6 +148,7 @@ namespace backend.Services
                                 _logger.LogInformation("Cleaning session {SessionId}", session.SessionId);
                                 // mark expired
                                 session.State = "Expired";
+                                session.ActiveClock = "paused";
 
                                 // ensure EF Core tracks the change and will persist it to the database
                                 db.WorkSessions.Update(session);
@@ -158,7 +160,7 @@ namespace backend.Services
                                     if (wh != null)
                                     {
                                         wh.EffectiveHours = Math.Round((session.ElapsedSeconds / 3600.0) * 100) / 100;
-                                        wh.EndTimeActual = DateTime.Now;
+                                        wh.EndTimeActual = runAt;
                                         wh.State = "Completed";
                                         if (!string.IsNullOrWhiteSpace(session.WorkerName)) wh.WorkerName = session.WorkerName;
                                     }
@@ -189,8 +191,8 @@ namespace backend.Services
                                                 {
                                                     ProcessEngineer = pe,
                                                     ProcessName = session.ProcessName,
-                                                    StartTime = DateTime.Now,
-                                                    EndTime = DateTime.Now,
+                                                    StartTime = runAt,
+                                                    EndTime = runAt,
                                                     NcmHours = nh,
                                                     ProductId = productId,
                                                     State = "Notified",
