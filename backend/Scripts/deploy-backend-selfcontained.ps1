@@ -13,7 +13,8 @@ param(
     [string]$PublishDir = 'E:\MISCMFactoryService\backend',
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
-    [int]$AspDotNetCorePort = 5080
+    [int]$AspDotNetCorePort = 5080,
+    [string]$DbBackupRoot = 'E:\WorkhourDBBackups'
 )
 
 # Resolve project path (script located in repo/scripts)
@@ -51,7 +52,24 @@ try {
     try {
         Write-Host ("Preparing to remove contents of publish folder: " + $PublishDir)
 
-        # Note: skipping automatic backup of workhour.db in the publish folder to avoid locking/cleanup complications.
+        # Auto-backup DB files before cleanup to avoid accidental data loss.
+        try {
+            $backupStamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+            $backupDir = Join-Path $DbBackupRoot $backupStamp
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+
+            $dbFiles = Get-ChildItem -Path $PublishDir -Filter 'workhour.db*' -File -ErrorAction SilentlyContinue
+            if ($dbFiles -and $dbFiles.Count -gt 0) {
+                foreach ($dbf in $dbFiles) {
+                    Copy-Item -Path $dbf.FullName -Destination (Join-Path $backupDir $dbf.Name) -Force
+                    Write-Host "Backed up $($dbf.Name) -> $backupDir"
+                }
+            } else {
+                Write-Host "No workhour.db* files found in publish folder to back up."
+            }
+        } catch {
+            Write-Warning ("Failed to back up DB files to {0}: {1}" -f $DbBackupRoot, $_)
+        }
 
         Write-Host ("Removing contents of publish folder: " + $PublishDir)
         Get-ChildItem -Path $PublishDir -Force | Remove-Item -Recurse -Force -ErrorAction Stop
