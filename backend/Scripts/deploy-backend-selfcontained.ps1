@@ -103,29 +103,7 @@ foreach ($f in $filesToCopy) {
     }
 }
 
-# RESTORE: If we backed up DB files earlier, restore the latest backup's workhour.db* files into the publish folder.
-try {
-    $parentDir = Split-Path -Parent $PublishDir
-    $backupRoot = Join-Path $parentDir 'db-backups'
-    if (Test-Path $backupRoot) {
-        $latestBackup = Get-ChildItem -Path $backupRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-        if ($latestBackup) {
-            $backupDbFiles = Get-ChildItem -Path $latestBackup.FullName -Filter 'workhour.db*' -File -ErrorAction SilentlyContinue
-            if ($backupDbFiles -and $backupDbFiles.Count -gt 0) {
-                foreach ($dbf in $backupDbFiles) {
-                    try {
-                        Copy-Item -Path $dbf.FullName -Destination (Join-Path $PublishDir $dbf.Name) -Force
-                        Write-Host "Restored $($dbf.Name) -> $PublishDir"
-                    } catch {
-                        Write-Warning "Failed to restore $($dbf.Name) from backup: $_"
-                    }
-                }
-            }
-        }
-    }
-} catch {
-    Write-Warning "Error while attempting to restore DB files from backups: $_"
-}
+# SKIP RESTORE: Currently skips latest backup's workhour.db* files into the publish folder. As it might corrupt the DB if there's structure change.
 
 # If no backup files were restored, ensure any DB files from the backend source folder are copied across (shm/wal/bak if present)
 try {
