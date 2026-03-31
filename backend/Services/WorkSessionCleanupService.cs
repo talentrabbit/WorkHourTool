@@ -42,6 +42,15 @@ namespace backend.Services
                     _restoreWindowDays = section.GetValue<int>("RestoreWindowDays", 0);
                     var schedule = section.GetValue<string>("ScheduleTime", "23:30");
                     if (TimeSpan.TryParse(schedule, out var st)) _scheduleTime = st;
+                    else _logger.LogWarning("WorkSessionCleanup.ScheduleTime value '{ScheduleRaw}' is invalid; fallback to default {DefaultSchedule}", schedule, _scheduleTime);
+
+                    _logger.LogInformation("Loaded WorkSessionCleanup config: Enabled={Enabled}, RestoreOnStartup={RestoreOnStartup}, RestoreWindowDays={RestoreWindowDays}, ScheduleTime={ScheduleTimeRaw} => Parsed={ParsedSchedule}",
+                        _enabled, _restoreOnStartup, _restoreWindowDays, schedule, _scheduleTime);
+                }
+                else
+                {
+                    _logger.LogWarning("WorkSessionCleanup section not found in configuration. Using defaults: Enabled={Enabled}, RestoreOnStartup={RestoreOnStartup}, RestoreWindowDays={RestoreWindowDays}, Schedule={Schedule}",
+                        _enabled, _restoreOnStartup, _restoreWindowDays, _scheduleTime);
                 }
             }
             catch (Exception ex)
@@ -134,8 +143,7 @@ namespace backend.Services
 
                     var stale = db.WorkSessions
                         .Where(s => (s.State == "Working" || s.State == "NotStarted")
-                            && s.StartTimeActual >= todayStart
-                            && s.StartTimeActual < tomorrowStart)
+                            && s.StartTimeActual < tomorrowStart)  // only consider sessions that started today or earlier
                         .ToList();
 
                     if (stale.Any())
@@ -215,6 +223,10 @@ namespace backend.Services
                         }
 
                         db.SaveChanges();
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No opened WorkSession record found! Perfect day for cleanup :)");
                     }
                 }
                 catch (Exception ex)
