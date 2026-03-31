@@ -59,7 +59,13 @@ if (_parsedPort.HasValue)
     Console.WriteLine($"[bootstrap] ASPNETCORE_URLS set to {_urls} (from port parameter)");
 }
 
-var builder = WebApplication.CreateBuilder(args);
+var appBaseDir = AppContext.BaseDirectory;
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = appBaseDir
+});
+Console.WriteLine($"[bootstrap] ContentRootPath set to {appBaseDir}");
 
 // Reduce verbose EF Core SQL logs: show only warnings or above for EF Core categories
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", Microsoft.Extensions.Logging.LogLevel.Warning);
