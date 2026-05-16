@@ -451,7 +451,7 @@ namespace backend.Controllers
                 var db = GetDb();
                 var names = db.Users
                     .AsNoTracking()
-                    .Where(u => !string.IsNullOrWhiteSpace(u.FullName) && !string.IsNullOrWhiteSpace(u.Role) && (u.Role.ToLower().Contains("engineer") || u.Role.ToLower().Contains("process")))
+                    .Where(u => !string.IsNullOrWhiteSpace(u.FullName) && !string.IsNullOrWhiteSpace(u.Role) && (u.Role.ToLower().Contains("processengineer") ))
                     .Select(u => u.FullName!)
                     .Distinct()
                     .OrderBy(n => n)

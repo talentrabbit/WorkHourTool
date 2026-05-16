@@ -173,6 +173,20 @@ namespace backend.Services
             return false;
         }
 
+        // Remove a session from in-memory management only (does not touch DB row).
+        // Used by cleanup flows to stop timer-driven snapshot writes before DB terminal-state updates.
+        public bool StopManagingSession(string sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId)) return false;
+            if (_sessions.TryRemove(sessionId, out var managed))
+            {
+                try { managed.Dispose(); } catch { }
+                _logger?.LogInformation("Stopped managing WorkSession {SessionId} in memory", sessionId);
+                return true;
+            }
+            return false;
+        }
+
         public bool CompleteSession(string sessionId, int? finalElapsedSeconds = null)
         {
             if (string.IsNullOrWhiteSpace(sessionId)) return false;
@@ -260,6 +274,14 @@ namespace backend.Services
                 var existing = db.WorkSessions.FirstOrDefault(s => s.SessionId == session.SessionId);
                 if (existing != null)
                 {
+                    // DB > Memory for Completed/Expired sessions.
+                    // This prevents cleanup/complete updates from being overwritten by stale timer state.
+                    if (string.Equals(existing.State, "Completed", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(existing.State, "Expired", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+
                     existing.LastHeartbeat = session.LastHeartbeat;
                     existing.ElapsedSeconds = session.ElapsedSeconds;
                     existing.ActiveClock = session.ActiveClock;

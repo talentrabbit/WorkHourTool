@@ -52,11 +52,21 @@ import { inject, computed } from 'vue'
 // Import hero image from src/assets so Vite bundles it
 import entryUrl from '../assets/Entry.jpg?url'
 const userRole = inject('userRole') || ''
+const userRoles = inject('userRoles') || []
 const roleVal = computed(() => (typeof userRole === 'object' && 'value' in userRole) ? (userRole.value || '') : (userRole || ''))
-const isWorker = computed(() => roleVal.value.toLowerCase() === 'worker')
-const isManager = computed(() => roleVal.value.toLowerCase() === 'productionmanager')
-const isAdmin = computed(() => roleVal.value.toLowerCase() === 'administrator')
-const isProcess = computed(() => { const r = roleVal.value.toLowerCase(); return r === 'process' || r === 'processengineer' })
+const roleList = computed(() => {
+  const fromInjected = (typeof userRoles === 'object' && userRoles && 'value' in userRoles && Array.isArray(userRoles.value))
+    ? userRoles.value
+    : []
+  if (fromInjected.length) {
+    return fromInjected.map(r => String(r || '').toLowerCase().trim()).filter(Boolean)
+  }
+  return String(roleVal.value || '').split(',').map(r => r.toLowerCase().trim()).filter(Boolean)
+})
+const isWorker = computed(() => roleList.value.includes('worker'))
+const isManager = computed(() => roleList.value.includes('productionmanager'))
+const isAdmin = computed(() => roleList.value.includes('administrator'))
+const isProcess = computed(() => roleList.value.includes('process') || roleList.value.includes('processengineer'))
 </script>
 
 <style scoped>
