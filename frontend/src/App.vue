@@ -65,8 +65,23 @@ import { useRouter } from 'vue-router'
 
 const username = ref(localStorage.getItem('username') || 'Guest')
 const userRole = ref(localStorage.getItem('userRole') || '')
+const userRoles = ref([])
+
+try {
+  const raw = localStorage.getItem('userRoles')
+  const parsed = raw ? JSON.parse(raw) : []
+  if (Array.isArray(parsed)) {
+    userRoles.value = parsed.filter(r => typeof r === 'string' && r.trim()).map(r => r.trim())
+  }
+} catch {}
+
+if (!userRoles.value.length && userRole.value) {
+  userRoles.value = userRole.value.split(',').map(r => r.trim()).filter(Boolean)
+}
+
 provide('username', username)
 provide('userRole', userRole)
+provide('userRoles', userRoles)
 
 // global flag to indicate a counting timer is active (provided to children)
 import { ref as vueRef } from 'vue'
@@ -81,14 +96,19 @@ const frontendVersion = ref('')
 const backendVersion = ref('')
 
 // Role-derived flags
-const isWorker = computed(() => (userRole.value || '').toLowerCase() === 'worker')
-const isManager = computed(() => (userRole.value || '').toLowerCase() === 'productionmanager')
-const isAdmin = computed(() => (userRole.value || '').toLowerCase() === 'administrator')
-// Process role (accept both 'process' and 'processengineer' values returned by find-user)
-const isProcess = computed(() => {
-  const r = (userRole.value || '').toLowerCase()
-  return r === 'process' || r === 'processengineer'
-})
+const normalizedRoles = computed(() => userRoles.value.map(r => String(r).toLowerCase().trim()).filter(Boolean))
+const hasRole = (roleName) => normalizedRoles.value.includes(String(roleName || '').toLowerCase())
+const isWorker = computed(() => hasRole('worker'))
+const isManager = computed(() => hasRole('productionmanager'))
+const isAdmin = computed(() => hasRole('administrator'))
+const isProcess = computed(() => hasRole('process') || hasRole('processengineer'))
+
+function normalizeRolesFromResponse(data) {
+  const list = []
+  if (Array.isArray(data?.roles)) list.push(...data.roles)
+  if (typeof data?.role === 'string') list.push(...data.role.split(','))
+  return Array.from(new Set(list.map(r => String(r || '').trim()).filter(Boolean)))
+}
 
 // Logon UI state
 const logonName = ref('')
@@ -103,19 +123,22 @@ async function applyUserFromResponse(data) {
     const prevRole = userRole.value
 
     username.value = data.fullName || data.user || data.gid || 'Guest'
-    userRole.value = data.role || (Array.isArray(data.roles) && data.roles[0]) || ''
+    const nextRoles = normalizeRolesFromResponse(data)
+    userRoles.value = nextRoles
+    userRole.value = nextRoles[0] || ''
     try { localStorage.setItem('username', username.value) } catch {}
     try { localStorage.setItem('userRole', userRole.value) } catch {}
+    try { localStorage.setItem('userRoles', JSON.stringify(userRoles.value)) } catch {}
 
     // Navigate based on role but DO NOT force a full page reload.
     // Full reload caused an infinite refresh loop in some dev setups (blocked localStorage or proxy behavior).
-    const r = (userRole.value || '').toLowerCase()
+    const r = normalizedRoles.value
     try {
-      if (r === 'productionmanager') {
+      if (r.includes('productionmanager')) {
         await router.push('/planning')
-      } else if (r === 'worker') {
+      } else if (r.includes('worker')) {
         await router.push('/worker')
-      } else if (r === 'administrator') {
+      } else if (r.includes('administrator')) {
         await router.push('/')
       }
     } catch (e) {
@@ -150,8 +173,10 @@ async function doLogon() {
 function doSignOut() {
   try { localStorage.removeItem('username') } catch {}
   try { localStorage.removeItem('userRole') } catch {}
+  try { localStorage.removeItem('userRoles') } catch {}
   username.value = 'Guest'
   userRole.value = ''
+  userRoles.value = []
   allowGuest.value = false
   showLogon.value = true
 }

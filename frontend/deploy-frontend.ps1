@@ -8,8 +8,23 @@ Write-Host "[deploy] Source: $Source"
 Write-Host "[deploy] Destination: $Destination"
 
 if (-not (Test-Path -LiteralPath $Source)) {
-  Write-Error "[deploy] Source does not exist: $Source. Build the frontend (vite build) first."
-  exit 1
+  Write-Host "[deploy] Source does not exist: $Source. Running frontend build (vite build)..."
+  Push-Location -Path $PSScriptRoot
+  try {
+    & npm run build
+    $buildExitCode = $LASTEXITCODE
+    if ($buildExitCode -ne 0) {
+      Write-Error "[deploy] Frontend build failed with exit code $buildExitCode"
+      exit $buildExitCode
+    }
+  } finally {
+    Pop-Location
+  }
+
+  if (-not (Test-Path -LiteralPath $Source)) {
+    Write-Error "[deploy] Source still does not exist after build: $Source"
+    exit 1
+  }
 }
 
 if (-not (Test-Path -LiteralPath $Destination)) {

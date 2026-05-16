@@ -75,9 +75,10 @@ namespace backend.Services
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    var startDate = DateTime.Today.AddDays(-_restoreWindowDays);
+                    var todayStart = DateTime.Today;
+                    var tomorrowStart = todayStart.AddDays(1);
                     var toRestore = db.WorkSessions
-                        .Where(s => (s.State == "Working" || s.State == "NotStarted") && s.StartTimeActual >= startDate)
+                        .Where(s => s.State == "Working" && s.StartTimeActual >= todayStart && s.StartTimeActual < tomorrowStart)
                         .ToList();
 
                     if (toRestore.Any())
@@ -142,8 +143,8 @@ namespace backend.Services
                     _logger.LogInformation("WorkSessionCleanupService running scheduled end-of-day cleanup at {Now}", runAt);
 
                     var stale = db.WorkSessions
-                        .Where(s => (s.State == "Working" || s.State == "NotStarted")
-                            && s.StartTimeActual < tomorrowStart)  // only consider sessions that started today or earlier
+                        .Where(s => (s.State == "Working")
+                            && s.StartTimeActual > todayStart && s.StartTimeActual < tomorrowStart)  // process all open rows today.
                         .ToList();
 
                     if (stale.Any())
@@ -154,6 +155,7 @@ namespace backend.Services
                             try
                             {
                                 _logger.LogInformation("Cleaning session {SessionId}", session.SessionId);
+                                _manager.StopManagingSession(session.SessionId);
                                 // mark expired
                                 session.State = "Expired";
                                 session.ActiveClock = "paused";

@@ -156,11 +156,18 @@ import axios from 'axios'
 
 const username = inject('username')
 const userRole = inject('userRole')
+const userRoles = inject('userRoles')
 
-const role = computed(() => (userRole && userRole.value) ? userRole.value.toLowerCase() : '')
-const showAll = computed(() => role.value === 'administrator' || role.value === 'productionmanager')
+const roleList = computed(() => {
+  if (userRoles && Array.isArray(userRoles.value) && userRoles.value.length) {
+    return userRoles.value.map(r => String(r || '').toLowerCase().trim()).filter(Boolean)
+  }
+  const single = (userRole && userRole.value) ? userRole.value : ''
+  return String(single).split(',').map(r => r.toLowerCase().trim()).filter(Boolean)
+})
+const showAll = computed(() => roleList.value.includes('administrator') || roleList.value.includes('productionmanager'))
 // treat production manager as an admin for deletion and full NCM visibility
-const isAdmin = computed(() => role.value === 'administrator' || role.value === 'productionmanager')
+const isAdmin = computed(() => roleList.value.includes('administrator') || roleList.value.includes('productionmanager'))
 
 const records = ref([])
 const loading = ref(false)
