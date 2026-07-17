@@ -3,8 +3,8 @@
 A web application for manufacturing departments to track exact working hours for each worker. 
 
 ## Structure
-- **frontend/**: Vue 3 + Vite app for UI and timer controls
-- **backend/**: ASP.NET Core Web API for receiving and storing work session data
+- **frontend/**: Vue 3 + Vite single-page app using Vue Router, Axios, and VXETable. `main.js` creates the app, registers routes, and configures API calls to same-origin `/api`. `App.vue` owns the portal shell, navigation, sign-in state, and role context. Routed views cover planning, worker timer workflow, NCM time, product registration, maintenance, orders, and the main entry dashboard. `WorkHourTool.vue` coordinates `WorkSeat.vue` and `TimerClock.vue` for start/pause/resume/submit behavior.
+- **backend/**: ASP.NET Core Web API using controllers, EF Core, Serilog, Negotiate authentication, and SQLite or SQL Server. `Program.cs` configures dependency injection, CORS, authentication, static SPA hosting, and auth helper endpoints. `WorkHoursController` exposes product, planning, work hour, NCM, and session APIs; `OrdersController` handles order CRUD. `AppDbContext` maps products, work hours, NCM records, users, orders, and work sessions. `WorkSessionManager` maintains live timer state, while `WorkSessionCleanupService` restores and expires sessions on schedule.
 
 ## Usage
 - Workers start/pause/resume/end their workday using the frontend.
