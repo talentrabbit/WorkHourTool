@@ -1,0 +1,4 @@
+{
+  "backend": "1.0.1",
+  "notes": "Sample version file consumed by GET /api/WorkHours/version"
+}

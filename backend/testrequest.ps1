@@ -1,24 +1,37 @@
-
+# Basic API smoke tests for backend (PowerShell)
+# $baseUri = "http://localhost:5080/api/workhours"
 $baseUri = "http://localhost:5063/api/workhours"
 
-# 1. Test POST /api/workhours
-Write-Host "Testing POST /api/workhours..."
-$body = @{
-    workerName = "John"
-    mainTime = 3600
-    issueTime = 120
-    serialNo = "SN-001"
-} | ConvertTo-Json
-$response = Invoke-RestMethod -Uri $baseUri -Method Post -Body $body -ContentType "application/json; charset=utf-8"
-$response
+function PostJson($uri, $obj) {
+    try {
+        $json = $obj | ConvertTo-Json -Depth 6
+        Write-Host "POST $uri`n$json`n" -ForegroundColor Cyan
+        $res = Invoke-RestMethod -Uri $uri -Method Post -Body $json -ContentType 'application/json; charset=utf-8' -ErrorAction Stop
+        return $res
+    } catch {
+        Write-Host "ERROR POST $uri`n$json`n" -ForegroundColor Red
+        return $null
+    }
+}
 
-# 2. Test GET /api/workhours/product-status/{serialNo}
-Write-Host "Testing GET /api/workhours/product-status/{serialNo}..."
-$serialNo = "10005"
-$response = Invoke-RestMethod -Uri "$baseUri/product-status/$serialNo" -Method Get
-$response
+function GetJson($uri) {
+    try {
+        Write-Host "GET $uri" -ForegroundColor Cyan
+        $res = Invoke-RestMethod -Uri $uri -Method Get -ErrorAction Stop
+        return $res
+    } catch {
+        Write-Host "ERROR GET $uri" -ForegroundColor Red
+        return $null
+    }
+}
 
-# 3. Test GET /api/workhours/all-product-states
-# Write-Host "Testing GET /api/workhours/all-product-states..."
-# $response = Invoke-RestMethod -Uri "$baseUri/all-product-states" -Method Get
-# $response
+# New test: Fetch all product states
+Write-Host "=== 1) Get all product states (all-product-states) ===" -ForegroundColor Green
+$allProdStates = GetJson "$baseUri/all-product-states"
+if ($allProdStates -ne $null) {
+    Write-Host ("All product states: " + ($allProdStates | ConvertTo-Json -Depth 6)) -ForegroundColor Yellow
+} else {
+    Write-Host "Failed to fetch all product states" -ForegroundColor Red
+}
+
+Write-Host "=== Tests completed ===" -ForegroundColor Green

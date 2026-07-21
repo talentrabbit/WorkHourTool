@@ -23,5 +23,11 @@ namespace backend.DbModel
         // Actual start/end times which may differ from scheduled StartTime/EndTime
         public DateTime? StartTimeActual { get; set; }
         public DateTime? EndTimeActual { get; set; }
+
+        // New flag: when true, this WorkHour was created by a worker self-registration and production manager should be informed
+        public bool IfToInformProductionManager { get; set; } = false;
+
+        // New: physical or logical location where the work took place (added in DB)
+        public string? Location { get; set; }
     }
 }

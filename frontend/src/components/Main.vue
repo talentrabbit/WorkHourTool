@@ -1,7 +1,7 @@
 <template>
   <div class="entry-container">
     <header class="hero">
-      <img src="/entry.jpg" alt="Factory Hero" class="hero-img" />
+  <img :src="entryUrl" alt="Factory Hero" class="hero-img" />
       <h1 class="hero-title">SSME MI Digital Factory</h1>
       <p class="hero-desc">Empowering production managers and workers with digital tools for efficient manufacturing.</p>
     </header>
@@ -20,17 +20,53 @@
         <span class="icon">🧰</span>
         <span class="link-text">WorkHour Maintenance</span>
       </router-link>
+
+      <!-- New: Register Product -->
+      <router-link v-if="isAdmin" to="/product-register" class="entry-link attention">
+        <span class="icon">📦</span>
+        <span class="link-text">Register Product</span>
+      </router-link>
+
+      <!-- New: NCM Time -->
+      <router-link v-if="isProcess || isAdmin || isManager" to="/ncm" class="entry-link attention">
+        <span class="icon">🧾</span>
+        <span class="link-text">NCM Time</span>
+      </router-link>
+
+      <!-- New: KanBan (in construction) -->
+      <!-- <router-link to="/kanban" class="entry-link attention">
+        <span class="icon">📋</span>
+        <span class="link-text">KanBan</span>
+      </router-link> -->
+
+      <router-link v-if="isAdmin" to="/OrderInfo" class="entry-link attention">
+        <span class="icon">📦</span>
+        <span class="link-text">OrderInfo</span>
+      </router-link>
     </div>
   </div>
 </template>
 
 <script setup>
 import { inject, computed } from 'vue'
+// Import hero image from src/assets so Vite bundles it
+import entryUrl from '../assets/Entry.jpg?url'
 const userRole = inject('userRole') || ''
+const userRoles = inject('userRoles') || []
 const roleVal = computed(() => (typeof userRole === 'object' && 'value' in userRole) ? (userRole.value || '') : (userRole || ''))
-const isWorker = computed(() => roleVal.value.toLowerCase() === 'worker')
-const isManager = computed(() => roleVal.value.toLowerCase() === 'productionmanager')
-const isAdmin = computed(() => roleVal.value.toLowerCase() === 'administrator')
+const roleList = computed(() => {
+  const fromInjected = (typeof userRoles === 'object' && userRoles && 'value' in userRoles && Array.isArray(userRoles.value))
+    ? userRoles.value
+    : []
+  if (fromInjected.length) {
+    return fromInjected.map(r => String(r || '').toLowerCase().trim()).filter(Boolean)
+  }
+  return String(roleVal.value || '').split(',').map(r => r.toLowerCase().trim()).filter(Boolean)
+})
+const isWorker = computed(() => roleList.value.includes('worker'))
+const isManager = computed(() => roleList.value.includes('productionmanager'))
+const isAdmin = computed(() => roleList.value.includes('administrator'))
+const isProcess = computed(() => roleList.value.includes('process') || roleList.value.includes('processengineer'))
 </script>
 
 <style scoped>
@@ -75,16 +111,19 @@ const isAdmin = computed(() => roleVal.value.toLowerCase() === 'administrator')
   text-align: center;
   max-width: 400px;
 }
+  /* Make entry links wrap into multiple rows when there are many visible buttons */
   .entry-links {
     display: flex;
-    gap: 4vw;
+    flex-wrap: wrap; /* allow wrapping to next line */
+    gap: 1.5rem; /* consistent spacing between items */
     margin-top: 3vw;
     justify-content: center;
-    width: 60vw;
+    width: 100%;
     max-width: 1200px;
+    padding: 0 1rem;
   }
   .entry-link {
-    width: 22vw;
+    flex: 1 1 260px; /* grow/shrink, prefer ~260px width */
     min-width: 220px;
     max-width: 340px;
     height: 70px;

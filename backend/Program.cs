@@ -8,11 +8,71 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using backend.Data;
+using Microsoft.Extensions.DependencyInjection;
 
-var builder = WebApplication.CreateBuilder(args);
+// Parse optional port from command-line or environment and set ASPNETCORE_URLS before building the host
+// Supported: --port=5080, --port 5080, --aspnetcore-port=5080, -p 5080, port=5080
+var _cmdArgs = Environment.GetCommandLineArgs();
+int? _parsedPort = null;
+for (int _i = 0; _i < _cmdArgs.Length; _i++)
+{
+    var _a = _cmdArgs[_i] ?? string.Empty;
+    if (_a.StartsWith("--port=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(7), out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.Equals("--port", StringComparison.OrdinalIgnoreCase) && _i + 1 < _cmdArgs.Length)
+    {
+        if (int.TryParse(_cmdArgs[_i + 1], out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.StartsWith("--aspnetcore-port=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(18), out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.StartsWith("-p=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(3), out var _v)) { _parsedPort = _v; break; }
+    }
+    if (_a.Equals("-p", StringComparison.OrdinalIgnoreCase) && _i + 1 < _cmdArgs.Length)
+    {
+        if (int.TryParse(_cmdArgs[_i + 1], out var _v)) { _parsedPort = _v; break; }
+    }
+    // legacy style key=value
+    if (_a.StartsWith("port=", StringComparison.OrdinalIgnoreCase))
+    {
+        if (int.TryParse(_a.Substring(5), out var _v)) { _parsedPort = _v; break; }
+    }
+}
+
+// Check environment fallbacks if not present on command-line
+if (!_parsedPort.HasValue)
+{
+    var _envPort = Environment.GetEnvironmentVariable("ASPNETCORE_PORT") ?? Environment.GetEnvironmentVariable("PORT");
+    if (!string.IsNullOrWhiteSpace(_envPort) && int.TryParse(_envPort, out var _ev)) _parsedPort = _ev;
+}
+
+if (_parsedPort.HasValue)
+{
+    var _urls = $"http://0.0.0.0:{_parsedPort.Value}";
+    Environment.SetEnvironmentVariable("ASPNETCORE_URLS", _urls);
+    Console.WriteLine($"[bootstrap] ASPNETCORE_URLS set to {_urls} (from port parameter)");
+}
+
+var appBaseDir = AppContext.BaseDirectory;
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = appBaseDir
+});
+Console.WriteLine($"[bootstrap] ContentRootPath set to {appBaseDir}");
+
+// Reduce verbose EF Core SQL logs: show only warnings or above for EF Core categories
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", Microsoft.Extensions.Logging.LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", Microsoft.Extensions.Logging.LogLevel.Warning);
 
 // Configure Serilog to write logs to a file with timestamps
-var logsPath = Path.Combine(AppContext.BaseDirectory, "Logs");
+var logsPath = Path.Combine(AppContext.BaseDirectory, "logs");
 Directory.CreateDirectory(logsPath);
 
 // If Serilog is available, configure it; otherwise fall back to default logging
@@ -22,6 +82,9 @@ try
     {
         lc
             .MinimumLevel.Information()
+            // Avoid logging EF Core SQL text (Database.Command) at Information level
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .WriteTo.File(
                 Path.Combine(logsPath, "backend-.log"),
@@ -43,8 +106,21 @@ builder.Services.AddControllers().AddJsonOptions(opts =>
 });
 
 // Windows Authentication (Negotiate)
-builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
-    .AddNegotiate();
+// Allow tests to disable Negotiate by setting TEST_DISABLE_NEGOTIATE=1 in the process environment.
+var disableNegotiateEnv = Environment.GetEnvironmentVariable("TEST_DISABLE_NEGOTIATE");
+var disableNegotiate = string.Equals(disableNegotiateEnv, "1", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(disableNegotiateEnv, "true", StringComparison.OrdinalIgnoreCase);
+
+if (!disableNegotiate)
+{
+    builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+        .AddNegotiate();
+}
+else
+{
+    // In test mode, the test host will register its own Authentication scheme (e.g. 'Test').
+    builder.Services.AddAuthentication();
+}
 
 builder.Services.AddAuthorization();
 
@@ -54,26 +130,49 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend",
         policy => policy
             // allow the local dev origins that clients will use (localhost, 127.0.0.1 and the server hostname)
-            .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://shai571a:5173")
+            .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://shai571a:5173", "http://localhost:5080", "http://shai571a:5080")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials());
 });
 
-var app = builder.Build();
+// Register WorkSessionManager singleton so it can manage in-memory sessions across the app
+builder.Services.AddSingleton<backend.Services.WorkSessionManager>();
 
-// Load roles config
-var rolesConfigPath = Path.Combine(AppContext.BaseDirectory, "RolesConfig.json");
-RoleConfig rolesConfig = new RoleConfig();
-if (System.IO.File.Exists(rolesConfigPath))
+builder.Services.AddHostedService<backend.Services.WorkSessionCleanupService>();
+
+// Configure EF Core DbContext via DI (pooled). Reads DbPath/DbProvider from appsettings.json.
+try
 {
-    try
+    var dbProvider = (builder.Configuration["DbProvider"] ?? "sqlite").ToLowerInvariant();
+    var dbPathConfig = builder.Configuration["DbPath"];
+    string connString;
+    if (!string.IsNullOrWhiteSpace(dbPathConfig))
     {
-        var json = System.IO.File.ReadAllText(rolesConfigPath);
-        rolesConfig = System.Text.Json.JsonSerializer.Deserialize<RoleConfig>(json) ?? rolesConfig;
+        var dbPath = Path.IsPathRooted(dbPathConfig)
+            ? dbPathConfig
+            : Path.Combine(AppContext.BaseDirectory, dbPathConfig);
+        connString = $"Data Source={dbPath}";
     }
-    catch { }
+    else
+    {
+        connString = AppDbContext.ConnectionString;
+    }
+
+    if (dbProvider == "sqlserver")
+    {
+        builder.Services.AddDbContextPool<AppDbContext>(options => options.UseSqlServer(connString), poolSize: 64);
+    }
+    else
+    {
+        builder.Services.AddDbContextPool<AppDbContext>(options => options.UseSqlite(connString), poolSize: 64);
+    }
 }
+catch { /* fallback to AppDbContext.OnConfiguring if DI setup fails */ }
+
+// DbContext registered above via AddDbContextPool with options; no additional registration needed here.
+
+var app = builder.Build();
 
 // Use CORS in development (also applied globally below)
 if (app.Environment.IsDevelopment())
@@ -99,8 +198,29 @@ app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Helper that builds the response object for current user
-static (string user, string displayName, List<string> roles) BuildUserResponse(string? effectiveUser, string? displayName, RoleConfig rolesConfig)
+// SPA fallback: for any non-API request without a file extension, serve index.html
+// Run the fallback before static files so deep routes (e.g. /planning) return the SPA
+app.Use(async (context, next) =>
+{
+    // If the request is not for /api and does not contain a file extension, rewrite to /index.html
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) && !System.IO.Path.HasExtension(path))
+    {
+        context.Request.Path = "/index.html";
+    }
+    await next();
+});
+
+// Ensure static files (wwwroot) are served so the built SPA can be placed in the backend publish folder
+app.UseDefaultFiles(); // enables default file mapping (index.html)
+app.UseStaticFiles();  // serve files from wwwroot
+
+// Helper that builds the response object for current user using roles from Users table.
+static async Task<(string user, string displayName, List<string> roles)> BuildUserResponseAsync(
+    string? effectiveUser,
+    string? displayName,
+    IServiceScopeFactory scopeFactory,
+    CancellationToken cancellationToken = default)
 {
     effectiveUser ??= "Guest";
     displayName ??= effectiveUser;
@@ -116,24 +236,125 @@ static (string user, string displayName, List<string> roles) BuildUserResponse(s
     .Select(Norm)
     .ToHashSet();
 
-    bool inAdmins = rolesConfig.Administrators.Any(r => candidates.Contains(Norm(r)));
-    bool inPMs    = rolesConfig.ProductionManagers.Any(r => candidates.Contains(Norm(r)));
-    bool inPEs    = rolesConfig.ProcessEngineers.Any(r => candidates.Contains(Norm(r)));
-    bool inWorkers= rolesConfig.Workers.Any(r => candidates.Contains(Norm(r)));
+    using var scope = scopeFactory.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<backend.Data.AppDbContext>();
+    var users = await db.Users
+        .AsNoTracking()
+        .Where(u => !string.IsNullOrWhiteSpace(u.Role))
+        .Select(u => new { u.Gid, u.FullName, u.Mail, u.Role })
+        .ToListAsync(cancellationToken);
+
+    var roleSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var u in users)
+    {
+        var matched = candidates.Contains(Norm(u.Gid ?? string.Empty))
+            || candidates.Contains(Norm(u.FullName ?? string.Empty))
+            || candidates.Contains(Norm(u.Mail ?? string.Empty));
+        if (!matched) continue;
+
+        foreach (var role in ParseCanonicalRoles(u.Role))
+        {
+            roleSet.Add(role);
+        }
+    }
 
     var roles = new List<string>();
-    if (inAdmins) roles.Add("Administrator");
-    if (inPMs) roles.Add("ProductionManager");
-    if (inPEs) roles.Add("ProcessEngineer");
-    if (inWorkers) roles.Add("Worker");
+    if (roleSet.Contains("Administrator")) roles.Add("Administrator");
+    if (roleSet.Contains("ProductionManager")) roles.Add("ProductionManager");
+    if (roleSet.Contains("ProcessEngineer")) roles.Add("ProcessEngineer");
+    if (roleSet.Contains("Worker")) roles.Add("Worker");
 
     return (effectiveUser, displayName, roles);
+}
+
+static string? CanonicalRole(string? role)
+{
+    var key = (role ?? string.Empty)
+        .Trim()
+        .ToLowerInvariant()
+        .Replace(" ", string.Empty)
+        .Replace("_", string.Empty)
+        .Replace("-", string.Empty);
+
+    return key switch
+    {
+        "administrator" or "administrators" => "Administrator",
+        "productionmanager" or "productionmanagers" => "ProductionManager",
+        "processengineer" or "processengineers" => "ProcessEngineer",
+        "worker" or "workers" => "Worker",
+        _ => null
+    };
+}
+
+static IEnumerable<string> ParseCanonicalRoles(string? roleText)
+{
+    if (string.IsNullOrWhiteSpace(roleText)) yield break;
+
+    foreach (var part in roleText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        var role = CanonicalRole(part);
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            yield return role;
+        }
+    }
+}
+
+static async Task<RoleConfig> BuildRolesConfigFromDbAsync(IServiceScopeFactory scopeFactory, CancellationToken cancellationToken = default)
+{
+    using var scope = scopeFactory.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<backend.Data.AppDbContext>();
+
+    var users = await db.Users
+        .AsNoTracking()
+        .Where(u => !string.IsNullOrWhiteSpace(u.Role))
+        .Select(u => new { u.FullName, u.Gid, u.Mail, u.Role })
+        .ToListAsync(cancellationToken);
+
+    var result = new RoleConfig();
+    var admins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var pms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var pes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var workers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var u in users)
+    {
+        var name = !string.IsNullOrWhiteSpace(u.FullName)
+            ? u.FullName!.Trim()
+            : (!string.IsNullOrWhiteSpace(u.Gid) ? u.Gid!.Trim() : (u.Mail ?? string.Empty).Trim());
+        if (string.IsNullOrWhiteSpace(name)) continue;
+
+        foreach (var role in ParseCanonicalRoles(u.Role))
+        {
+            switch (role)
+            {
+                case "Administrator":
+                    admins.Add(name);
+                    break;
+                case "ProductionManager":
+                    pms.Add(name);
+                    break;
+                case "ProcessEngineer":
+                    pes.Add(name);
+                    break;
+                case "Worker":
+                    workers.Add(name);
+                    break;
+            }
+        }
+    }
+
+    result.Administrators = admins.OrderBy(x => x).ToList();
+    result.ProductionManagers = pms.OrderBy(x => x).ToList();
+    result.ProcessEngineers = pes.OrderBy(x => x).ToList();
+    result.Workers = workers.OrderBy(x => x).ToList();
+    return result;
 }
 
 // Dev-only or environment-sensitive mapping for current-user
 if (app.Environment.IsDevelopment())
 {
-    app.MapGet("/api/auth/current-user", async (HttpContext http, ILogger<Program> logger, IHostEnvironment env) =>
+    app.MapGet("/api/auth/current-user", async (HttpContext http, ILogger<Program> logger, IHostEnvironment env, IServiceScopeFactory scopeFactory) =>
     {
         var req = http.Request;
         var identity = http.User?.Identity;
@@ -203,14 +424,14 @@ if (app.Environment.IsDevelopment())
             }
         }
 
-        var (user, disp, roles) = BuildUserResponse(effectiveUser, displayName, rolesConfig);
+        var (user, disp, roles) = await BuildUserResponseAsync(effectiveUser, displayName, scopeFactory, http.RequestAborted);
         return Results.Ok(new { user, displayName = disp, roles });
 
     }).AllowAnonymous();
 }
 else
 {
-    app.MapGet("/api/auth/current-user", (HttpContext http, ILogger<Program> logger, IHostEnvironment env) =>
+    app.MapGet("/api/auth/current-user", async (HttpContext http, ILogger<Program> logger, IHostEnvironment env, IServiceScopeFactory scopeFactory) =>
     {
         var req = http.Request;
         var identity = http.User?.Identity;
@@ -276,7 +497,7 @@ else
             }
         }
 
-        var (user, disp, roles) = BuildUserResponse(effectiveUser, displayName, rolesConfig);
+        var (user, disp, roles) = await BuildUserResponseAsync(effectiveUser, displayName, scopeFactory, http.RequestAborted);
         return Results.Ok(new { user, displayName = disp, roles });
 
     }).RequireAuthorization();
@@ -310,18 +531,23 @@ static string ExtractSamAccountName(string domainQualified)
         : domainQualified;
 }
 
-// Endpoint to get roles configuration
-app.MapGet("/api/auth/roles", () => Results.Ok(rolesConfig)).AllowAnonymous();
+// Endpoint to get roles grouped by role name from Users table.
+app.MapGet("/api/auth/roles", async (IServiceScopeFactory scopeFactory, HttpContext http) =>
+{
+    var rolesConfig = await BuildRolesConfigFromDbAsync(scopeFactory, http.RequestAborted);
+    return Results.Ok(rolesConfig);
+}).AllowAnonymous();
 
 // Endpoint to find a user by Gid, FullName or Mail (case-insensitive)
-app.MapGet("/api/auth/find-user", (HttpRequest http, ILogger<Program> logger) =>
+app.MapGet("/api/auth/find-user", (HttpRequest http, ILogger<Program> logger, IServiceScopeFactory scopeFactory) =>
 {
     var q = http.Query["q"].FirstOrDefault()?.Trim();
     if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { message = "q query parameter is required" });
     var qn = q.ToLowerInvariant();
     try
     {
-        using var db = new backend.Data.AppDbContext();
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<backend.Data.AppDbContext>();
         var user = db.Users.AsNoTracking()
             .FirstOrDefault(u =>
                 (!string.IsNullOrWhiteSpace(u.Gid) && u.Gid.ToLower().Contains(qn)) ||
@@ -329,7 +555,15 @@ app.MapGet("/api/auth/find-user", (HttpRequest http, ILogger<Program> logger) =>
                 (!string.IsNullOrWhiteSpace(u.Mail) && u.Mail.ToLower().Contains(qn))
             );
         if (user == null) return Results.NotFound();
-        return Results.Ok(new { gid = user.Gid, fullName = user.FullName, mail = user.Mail, role = user.Role });
+        var canonicalRoles = ParseCanonicalRoles(user.Role).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return Results.Ok(new
+        {
+            gid = user.Gid,
+            fullName = user.FullName,
+            mail = user.Mail,
+            role = user.Role,
+            roles = canonicalRoles
+        });
     }
     catch (Exception ex)
     {
@@ -350,3 +584,6 @@ public class RoleConfig
     public List<string> ProcessEngineers { get; set; } = new List<string>();
     public List<string> Workers { get; set; } = new List<string>();
 }
+
+// Expose Program type for WebApplicationFactory in tests
+public partial class Program { }

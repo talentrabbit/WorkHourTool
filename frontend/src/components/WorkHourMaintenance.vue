@@ -1,6 +1,5 @@
 <template>
   <div class="maintenance-container">
-    <h2>WorkHour Maintenance</h2>
 
     <section class="collapsible">
       <header @click="toggle('wh')" class="collapsible-header">
@@ -25,23 +24,29 @@
             <option value="">All Workers</option>
             <option v-for="w in workerNames" :key="w" :value="w">{{ w }}</option>
           </select>
-          <select v-model="whFilter.processName" class="filter-input">
-            <option value="">All Processes</option>
-            <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
-          </select>
+          <input
+            v-model="whFilter.processName"
+            list="wh-process-names"
+            class="filter-input"
+            placeholder="All Processes (type to search)"
+          />
+          <datalist id="wh-process-names">
+            <option v-for="p in processNames" :key="p" :value="p"></option>
+          </datalist>
           <select v-model="whFilter.state" class="filter-input">
             <option value="">All States</option>
             <option v-for="s in workHourStates" :key="s" :value="s">{{ s }}</option>
           </select>
+          <input v-model="whFilter.location" placeholder="Location" class="filter-input" />
           <label class="filter-input">Start From: <input type="date" v-model="whFilter.startFrom" /></label>
           <label class="filter-input">Start To: <input type="date" v-model="whFilter.startTo" /></label>
           <button @click.stop="clearWhFilters">Clear</button>
         </div>
 
-        <vxe-table :data="filteredWorkHours" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChange('wh', $event)" @checkbox-all="onCheckChange('wh', $event)">
+  <vxe-table :data="pagedFilteredWorkHours" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChange('wh', $event)" @checkbox-all="onCheckChange('wh', $event)">
           <vxe-column type="checkbox" width="50" />
-          <vxe-column field="id" title="ID" width="70" />
-          <vxe-column field="serialNo" title="SerialNo" width="90" />
+          <vxe-column field="id" title="ID" width="50" />
+          <vxe-column field="serialNo" title="SerialNo" width="80" />
           <vxe-column field="systemType" title="SystemType" width="140" />
           <vxe-column field="state" title="State" width="90" />
 
@@ -51,19 +56,30 @@
                 <option v-for="w in workerNames" :key="w" :value="w">{{ w }}</option>
               </select>
             </template>
+          </vxe-column>          
+
+          <vxe-column field="processName" title="ProcessName" width="200">
+            <template #default="{ row }">
+              <template v-if="String(row.serialNo) === '999999'">
+                <input type="text" v-model="row.processName" class="cell-input" @input="() => markChanged('wh', row.id)" />
+              </template>
+              <template v-else>
+                <select v-model="row.processName" class="cell-input" @change="() => markChanged('wh', row.id)">
+                  <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
+                </select>
+              </template>
+            </template>
+          </vxe-column>
+
+          <vxe-column field="location" title="Location" width="200">
+            <template #default="{ row }">
+              <input type="text" v-model="row.location" class="cell-input" @input="() => markChanged('wh', row.id)" />
+            </template>
           </vxe-column>
 
           <vxe-column field="plannedHours" title="PlannedHours" width="120">
             <template #default="{ row }">
               <input type="number" step="0.1" min="0" v-model.number="row.plannedHours" class="cell-input eh-input" @input="() => markChanged('wh', row.id)" />
-            </template>
-          </vxe-column>
-
-          <vxe-column field="processName" title="ProcessName" width="200">
-            <template #default="{ row }">
-              <select v-model="row.processName" class="cell-input" @change="() => markChanged('wh', row.id)">
-                <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
-              </select>
             </template>
           </vxe-column>
 
@@ -75,7 +91,13 @@
 
           <vxe-column field="startTimeActual" title="StartTimeActual" width="220">
             <template #default="{ row }">
-              <div>{{ formatDateTime(row.startTimeActual || row.startTime) }}</div>
+              <input type="datetime-local" :value="toLocalInput(row.startTimeActual || row.startTime)" @change="e => onStartChange(row, e.target.value, true)" class="cell-input" />
+            </template>
+          </vxe-column>
+
+          <vxe-column field="endTimeActual" title="EndTimeActual" width="220">
+            <template #default="{ row }">
+              <input type="datetime-local" :value="toLocalInput(row.endTimeActual || row.endTime)" @change="e => onEndChange(row, e.target.value, true)" class="cell-input" />
             </template>
           </vxe-column>
 
@@ -89,94 +111,25 @@
             <template #default="{ row }">
               <input type="datetime-local" :value="toLocalInput(row.endTime)" @change="e => onEndChange(row, e.target.value, false)" class="cell-input" />
             </template>
-          </vxe-column>
-
-          <vxe-column field="endTimeActual" title="EndTimeActual" width="220">
-            <template #default="{ row }">
-              <div>{{ formatDateTime(row.endTimeActual || row.endTime) }}</div>
-            </template>
-          </vxe-column>
+          </vxe-column>         
 
         </vxe-table>
+        <div class="pager" style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <button :disabled="whPage <= 1" @click="whPage = 1">First</button>
+          <button :disabled="whPage <= 1" @click="whPage = Math.max(1, whPage-1)">Prev</button>
+          <span>Page {{ whPage }} / {{ whTotalPages }}</span>
+          <button :disabled="whPage >= whTotalPages" @click="whPage = Math.min(whTotalPages, whPage+1)">Next</button>
+          <button :disabled="whPage >= whTotalPages" @click="whPage = whTotalPages">Last</button>
+          <span style="margin-left:8px;color:#666">Total: {{ filteredWorkHours.length }}</span>
+        </div>
       </div>
     </section>
 
-    <section class="collapsible">
-      <header @click="toggle('ncm')" class="collapsible-header">
-        <h3>NcmTimes</h3>
-        <span>{{ open.ncm ? '▾' : '▸' }}</span>
-      </header>
-      <div v-show="open.ncm" class="collapsible-body">
-        <div class="actions">
-          <button :disabled="!changed.ncm.size" @click="saveNcmTimes">Save</button>
-          <button :disabled="!selected.ncm.size" @click="deleteNcmTimes">Delete</button>
-        </div>
-
-        <!-- Filters for NcmTimes -->
-        <div class="filter-header" @click="toggleFilter('ncm')">
-          <strong>Filters</strong>
-          <span class="filter-toggle">{{ filterOpen.ncm ? '▾' : '▸' }}</span>
-        </div>
-        <div v-show="filterOpen.ncm" class="filters">
-          <input v-model="ncmFilter.serialNo" placeholder="SerialNo" class="filter-input" />
-          <select v-model="ncmFilter.processEngineer" class="filter-input">
-            <option value="">All Engineers</option>
-            <option v-for="e in processEngineerNames" :key="e" :value="e">{{ e }}</option>
-          </select>
-          <select v-model="ncmFilter.processName" class="filter-input">
-            <option value="">All Processes</option>
-            <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
-          </select>
-          <label class="filter-input">Start From: <input type="date" v-model="ncmFilter.startFrom" /></label>
-          <label class="filter-input">Start To: <input type="date" v-model="ncmFilter.startTo" /></label>
-          <button @click.stop="clearNcmFilters">Clear</button>
-        </div>
-
-        <vxe-table :data="filteredNcmTimes" border stripe round class="modern-vxe-table" @checkbox-change="onCheckChange('ncm', $event)" @checkbox-all="onCheckChange('ncm', $event)">
-          <vxe-column type="checkbox" width="50" />
-          <vxe-column field="id" title="ID" width="70" />
-          <vxe-column field="serialNo" title="SerialNo" width="90" />
-          <vxe-column field="systemType" title="SystemType" width="140" />
-
-          <vxe-column field="processEngineer" title="ProcessEngineer" width="200">
-            <template #default="{ row }">
-              <select v-model="row.processEngineer" class="cell-input" @change="() => markChanged('ncm', row.id)">
-                <option v-for="e in processEngineerNames" :key="e" :value="e">{{ e }}</option>
-              </select>
-            </template>
-          </vxe-column>
-
-          <vxe-column field="processName" title="ProcessName" width="200">
-            <template #default="{ row }">
-              <select v-model="row.processName" class="cell-input" @change="() => markChanged('ncm', row.id)">
-                <option v-for="p in processNames" :key="p" :value="p">{{ p }}</option>
-              </select>
-            </template>
-          </vxe-column>
-
-          <vxe-column field="startTime" title="Start Time" width="190">
-            <template #default="{ row }">
-              <div>{{ formatDateTime(row.startTime) }}</div>
-            </template>
-          </vxe-column>
-
-          <vxe-column field="endTime" title="End Time" width="190">
-            <template #default="{ row }">
-              <div>{{ formatDateTime(row.endTime) }}</div>
-            </template>
-          </vxe-column>
-
-          <vxe-column field="ncmHour" title="NcmHour" width="140" />
-          <vxe-column field="ncmAction" title="NcmAction" width="200" />
-
-        </vxe-table>
-      </div>
-    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
 
 const open = ref({ wh: true, ncm: false })
@@ -192,7 +145,7 @@ const selected = reactive({ wh: new Set(), ncm: new Set() })
 const changed = reactive({ wh: new Set(), ncm: new Set() })
 
 // filters
-const whFilter = reactive({ serialNo: '', workerName: '', processName: '', state: '', startFrom: '', startTo: '' })
+const whFilter = reactive({ serialNo: '', workerName: '', processName: '', state: '', startFrom: '', startTo: '', location: '' })
 const ncmFilter = reactive({ serialNo: '', processEngineer: '', processName: '', startFrom: '', startTo: '' })
 // filter panel open flags
 const filterOpen = ref({ wh: true, ncm: true })
@@ -226,21 +179,24 @@ function formatDateTime(dt){
   try { return new Date(dt).toLocaleString() } catch { return String(dt) }
 }
 
+// ...existing code...
+
 function onStartChange(row, value, actual=false){
-  const iso = new Date(value)
-  if (!isNaN(iso)){
-    // store in startTime or startTimeActual depending on actual flag
-    if (actual) row.startTimeActual = iso.toISOString()
-    else row.startTime = iso.toISOString()
+  // value is in local 'YYYY-MM-DDTHH:MM' from datetime-local input
+  if (value && value.length >= 16) {
+    const localWithSeconds = value + ':00'
+    if (actual) row.startTimeActual = localWithSeconds
+    else row.startTime = localWithSeconds
     markChanged('wh', row.id)
   }
 }
 
 function onEndChange(row, value, actual=false){
-  const iso = new Date(value)
-  if (!isNaN(iso)){
-    if (actual) row.endTimeActual = iso.toISOString()
-    else row.endTime = iso.toISOString()
+  // value is in local 'YYYY-MM-DDTHH:MM' from datetime-local input
+  if (value && value.length >= 16) {
+    const localWithSeconds = value + ':00'
+    if (actual) row.endTimeActual = localWithSeconds
+    else row.endTime = localWithSeconds
     markChanged('wh', row.id)
   }
 }
@@ -252,6 +208,7 @@ function clearWhFilters(){
   whFilter.state = ''
   whFilter.startFrom = ''
   whFilter.startTo = ''
+  whFilter.location = ''
 }
 function clearNcmFilters(){
   ncmFilter.serialNo = ''
@@ -275,6 +232,7 @@ const filteredWorkHours = computed(() => {
     if (whFilter.workerName && r.workerName !== whFilter.workerName) return false
     if (whFilter.processName && r.processName !== whFilter.processName) return false
     if (whFilter.state && r.state !== whFilter.state) return false
+    if (whFilter.location && !((r.location || '').toLowerCase().includes(whFilter.location.toLowerCase()))) return false
     if (from){ const st = r.startTime ? new Date(r.startTime) : null; if (!st || st < from) return false }
     if (to){ const st = r.startTime ? new Date(r.startTime) : null; if (!st || st > new Date(to.getFullYear(), to.getMonth(), to.getDate(),23,59,59,999)) return false }
     return true
@@ -292,6 +250,24 @@ const filteredNcmTimes = computed(() => {
     if (to){ const st = r.startTime ? new Date(r.startTime) : null; if (!st || st > new Date(to.getFullYear(), to.getMonth(), to.getDate(),23,59,59,999)) return false }
     return true
   })
+})
+
+// --- Pagination for WorkHours ---
+const pageSize = 10
+const whPage = ref(1)
+
+const whTotalPages = computed(() => Math.max(1, Math.ceil(filteredWorkHours.value.length / pageSize)))
+
+// clamp pages when total changes
+watch(whTotalPages, (t) => { if (whPage.value > t) whPage.value = t })
+
+// reset to page 1 when filters change
+watch(() => [whFilter.serialNo, whFilter.workerName, whFilter.processName, whFilter.state, whFilter.location, whFilter.startFrom, whFilter.startTo], () => { whPage.value = 1 })
+
+const pagedFilteredWorkHours = computed(() => {
+  const arr = filteredWorkHours.value || []
+  const start = (Math.max(1, whPage.value) - 1) * pageSize
+  return arr.slice(start, start + pageSize)
 })
 
 async function loadAll(){
@@ -368,13 +344,14 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-.maintenance-container{ padding: 12px }
+.maintenance-container{ width: min(1850px, 92%); max-width: 92%; margin: 0 0 0 2rem; padding: 12px }
 .collapsible{ margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px }
 .collapsible-header{ display:flex; justify-content:space-between; padding:8px; background:#f7f7f7; cursor:pointer }
+.collapsible-header h3 { font-family: 'Times New Roman', Times, serif; font-size: 1.05rem; font-weight: 600; margin: 0; }
 .collapsible-body{ padding:12px }
 .actions{ margin-bottom:8px }
 .cell-input{ width:100% }
-.eh-input{ width:110px }
+.eh-input{ width:80px }
 .modern-vxe-table{ font-size:13px }
 .filters{ display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap }
 .filter-input{ padding:6px 8px; border-radius:6px; border:1px solid #ddd }

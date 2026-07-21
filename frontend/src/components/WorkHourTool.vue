@@ -3,6 +3,10 @@ import { ref, provide, watch, computed, onMounted, onUnmounted, inject } from 'v
 import axios from 'axios'
 import WorkSeat from './WorkSeat.vue'
 import TimerClock from './TimerClock.vue'
+// Hero carousel images from src/assets so they are bundled
+import hero1 from '../assets/HeroSection/factory1.jpg?url'
+import hero2 from '../assets/HeroSection/factory2.jpg?url'
+import hero3 from '../assets/HeroSection/factory3.jpg?url'
 
 const activeTab = ref('task')
 // Shared state for timer running
@@ -17,11 +21,7 @@ const selectedSerial = ref('')
 const selectedProcess = ref('')
 const selectedWorkHourId = ref(null)
 
-const heroImages = [
-  '/HeroSection/factory1.jpg',
-  '/HeroSection/factory2.jpg',
-  '/HeroSection/factory3.jpg'
-]
+const heroImages = [hero1, hero2, hero3]
 const currentHero = ref(0)
 function nextHero() {
   currentHero.value = (currentHero.value + 1) % heroImages.length
@@ -98,32 +98,32 @@ async function checkTodayAssignments(){
   }
 }
 
+// Notice, this function return 1st record of matching serial/process. If multiple assignments exist for same serial/process, it may not be the intended one.
 async function resolveWorkHourId(serial, processName) {
   selectedWorkHourId.value = null
   if (!serial) return
   try {
     const worker = matchedWorkerName.value || username.value || 'Guest'
-    // Prefer using the assignment's start date if present
-    // Helper: format a Date (or date-string) as local YYYY-MM-DD (use wall-clock local date)
-    const formatLocalYMD = (dInput) => {
+
+    // Helper: format a Date (or date-string) as local YYYY-MM-DD HH:mm:ss to match DB format
+    const formatLocalDateTime = (dInput) => {
       const d = (dInput instanceof Date) ? dInput : new Date(dInput)
       if (isNaN(d.getTime())) return ''
-      const y = d.getFullYear()
-      const m = String(d.getMonth() + 1).padStart(2, '0')
-      const day = String(d.getDate()).padStart(2, '0')
-      return `${y}-${m}-${day}`
+      const pad = n => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
     }
 
-    // Default to today's local date
-    let startDateStr = formatLocalYMD(new Date())
+    // Default to now (local) in DB-friendly format
+    let startDateStr = formatLocalDateTime(new Date())
     const assign = todayAssignments.value.find(a => a.serialNo === serial && (!processName || ((a.processName || a.process || '') || '').toLowerCase().includes((processName || '').toLowerCase())))
     if (assign && assign.startTime) {
       console.info("assign start time is", assign.startTime)
-      // string format expected: "2023-08-15"
-      startDateStr = formatLocalYMD(assign.startTime)
+      // Use the assignment's full local datetime (DB format)
+      startDateStr = formatLocalDateTime(assign.startTime)
       console.info("startDateStr is", startDateStr)
     }
-    const res = await axios.get('/api/WorkHours/find-workhour-id', { params: { workerName: worker, serialNo: serial, startDate: startDateStr } })
+
+    const res = await axios.get('/api/WorkHours/find-workhour-id', { params: { workerName: worker, serialNo: serial, startDateTime: startDateStr, processName: processName } })
     if (res && res.data && (res.data.id !== undefined && res.data.id !== null)) {
       selectedWorkHourId.value = res.data.id
     } else {
@@ -146,7 +146,7 @@ function onAssignmentClick(params) {
   void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
 }
 
-function onAssignmentCellClick(params) {
+async function onAssignmentCellClick(params) {
   // vxe-table cell-click provides { row, column, cell, rowIndex, columnIndex }
   const row = params?.row
   const col = params?.column
@@ -158,10 +158,16 @@ function onAssignmentCellClick(params) {
     if (isCompletedCell) return
     if (row?.serialNo) selectedSerial.value = row.serialNo
     selectedProcess.value = row?.processName || row?.process || ''
-    // resolve id for selection
-    void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
-    // switch to counting tab automatically
-    activeTab.value = 'counting'
+    // resolve id for selection and wait for it so TimerClock receives the id on creation
+    await resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+    if (selectedWorkHourId.value) {
+      // switch to counting tab only if we resolved a WorkHourId
+      activeTab.value = 'counting'
+    } else {
+      // no workhour found; keep selection and notify user
+      console.warn('No WorkHourId found for selected assignment', selectedSerial.value, selectedProcess.value)
+      // optional: alert('No WorkHour record found for this assignment.')
+    }
   } else {
     // fallback to row click behavior
     onAssignmentClick(params)
@@ -169,18 +175,19 @@ function onAssignmentCellClick(params) {
 }
 
 // Helper used by the State column button to start work for a row
-function startWorkFromRow(row) {
+async function startWorkFromRow(row) {
   if (!row) return
   // Prevent starting work for completed rows (case-insensitive)
   if ((row.state || '').toString().toLowerCase() === 'completed') return
   try {
     selectedSerial.value = row.serialNo
     selectedProcess.value = row.processName || row.process || ''
-    void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
+    console.info("startWorkFromRow selectedSerial is", selectedSerial.value, "selectedProcess is", selectedProcess.value,"selectedWorkHourId is", selectedWorkHourId.value)
+    await resolveWorkHourId(selectedSerial.value, selectedProcess.value)
   } catch (e) {
     // ignore
   }
-  activeTab.value = 'counting'
+  if (selectedWorkHourId.value) activeTab.value = 'counting'
 }
 
 // Provide a row class function to dim completed rows
@@ -188,17 +195,7 @@ function rowClassName({ row }) {
   return row && row.state === 'Completed' ? 'row-completed' : ''
 }
 
-// When user navigates to counting tab without an explicit selection,
-// pick the first assignment and resolve its WorkHourId so TimerClock can use it.
 watch(activeTab, (nv) => {
-  if (nv === 'counting' && !selectedSerial.value && todayAssignments.value && todayAssignments.value.length) {
-    const first = todayAssignments.value[0]
-    if (first) {
-      selectedSerial.value = first.serialNo
-      selectedProcess.value = first.processName || first.process || ''
-      void resolveWorkHourId(selectedSerial.value, selectedProcess.value)
-    }
-  }
   // When switching back to Task Arrangement, refresh today's assignments
   if (nv === 'task') {
     // re-check assignments so the table reflects recent submissions/assignments
@@ -237,7 +234,6 @@ function handleStartWork(payload) {
     <div class="nav-header">
       <!-- Removed duplicate logo -->
       <div class="nav-header-spacer"></div>
-      <!-- <img src="/title-graph.png" alt="Title Graph" class="title-graph" /> -->
     </div>
     <div class="hero-section">
       <div class="hero-carousel">
@@ -254,9 +250,11 @@ function handleStartWork(payload) {
         Task Arrangement
       </button>
 
-      <button :class="{ active: activeTab === 'counting' }" @click="activeTab = 'counting'">Work Hour Counting Tool</button>
+      <!-- Disabled: users must select a row to enter counting mode -->
+      <button :class="{ active: activeTab === 'counting', disabled: activeTab !== 'counting' }" disabled title="Open a work item from Task Arrangement to switch to the Work Hour Counting Tool">Work Hour Counting Tool</button>
 
-      <button
+      <!-- Department Introduction hidden while content is not ready -->
+      <button v-if="false"
         :class="{ active: activeTab === 'intro', disabled: (isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted }"
         :disabled="(isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted"
         @click="!((isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted) && (activeTab = 'intro')">
@@ -320,7 +318,7 @@ function handleStartWork(payload) {
     height: auto;
     transition: opacity 0.5s ease-in-out;
   }
-.nav-layout { display: flex; flex-direction: column; min-height: 100vh; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
+.nav-layout { max-width: 96%; width: 75vw; display: flex; flex-direction: column; min-height: 100vh; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
 .nav-header { display: flex; align-items: center; padding: 1em 2em 0.5em 1em; }
 .company-logo { display:none; }
 .hero-section h1 { margin: 0; font-size: 2.5em; color: #EC6602; }

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed, defineEmits } from 'vue'
+import { ref, inject, onMounted, onBeforeUnmount, defineProps, toRef, watch, computed, defineEmits, nextTick } from 'vue'
 import axios from 'axios'
 // Sync timer state with parent for disabling tabs
 const isCountingTimerActive = inject('isCountingTimerActive', null)
@@ -8,7 +8,7 @@ const isWorkSubmitted = inject('isWorkSubmitted', null)
 const username = inject('username', ref('Guest'))
 
 const props = defineProps({
-  serialNo: { type: String, default: 'SN-101009' },
+  serialNo: { type: String, default: '101000' },
   process: { type: String, default: 'Assembly' },
   workSeat: { type: String, default: 'WS-02' },
   initialWorkHourId: { type: [String, Number], default: null }
@@ -69,23 +69,57 @@ async function fetchAggregates() {
 
 const workTime = ref(0) // seconds
 const ncmTime = ref(0) // seconds
-const activeClock = ref('') // 'work' or 'ncm' or ''
+const activeClock = ref('paused') // changed from '' to 'paused' to have two explicit states: 'active' | 'paused'
 let timer = null
 const currentWorkHourId = ref(null)
 
 // NCM metadata captured when NCM timer is started
 const processEngineer = ref('')
-const ncmAction = ref('')
+// Renamed: ncmAction -> callingContent (backend NcmTime.CallingContent)
+const callingContent = ref('')
 const showNcmInputs = ref(false)
 const submitted = ref(false)
 
+// Confirmation modal state for submitting work hours
+const showSubmitConfirm = ref(false)
+const confirmCancelBtn = ref(null)
+
+// Transient message (fade-out) state
+const messageText = ref('')
+const messageVisible = ref(false)
+let messageTimeout = null
+
+function showTransientMessage(text, ms = 3000) {
+  if (messageTimeout) { clearTimeout(messageTimeout); messageTimeout = null }
+  messageText.value = text
+  messageVisible.value = true
+  messageTimeout = setTimeout(() => { messageVisible.value = false; messageTimeout = null }, ms)
+}
+
+async function requestSubmitWorkHours() {
+  if (submitted.value) return
+  showSubmitConfirm.value = true
+  await nextTick()
+  try { confirmCancelBtn.value?.focus() } catch (e) { /* ignore */ }
+}
+
+function cancelSubmit() {
+  showSubmitConfirm.value = false
+}
+
+function confirmSubmit() {
+  showSubmitConfirm.value = false
+  // call the (possibly wrapped) submitWorkHours function
+  void submitWorkHours()
+}
+
 // New: support multiple NCM entries and dropdown options
 const processEngineerOptions = ref([])
-const ncmRows = ref([{ processEngineer: '', ncmAction: '', sent: false }])
+const ncmRows = ref([{ processEngineer: '', callingContent: '', sent: false }])
 const sendingNcms = ref(false)
 
 const availableCount = computed(() => {
-  return ncmRows.value.filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim()))).length
+  return ncmRows.value.filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.callingContent && r.callingContent.trim()))).length
 })
 
 // Fetch process engineer names for the dropdown
@@ -101,7 +135,7 @@ async function fetchProcessEngineers() {
 
 // Add a new empty NCM row
 function addNcmRow() {
-  ncmRows.value.push({ processEngineer: '', ncmAction: '', sent: false })
+  ncmRows.value.push({ processEngineer: '', callingContent: '', sent: false })
 }
 // Remove a row by index
 function removeNcmRow(index) {
@@ -122,10 +156,10 @@ async function sendNcms() {
     return
   }
   // build payload from rows; include approximate Start/End from the current ncmTime
-  const start = Date.now()
-  const end = Date.now()
+  const start = new Date()
+  const end = new Date()
   const payload = ncmRows.value
-    .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim())))
+    .filter(r => !r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.callingContent && r.callingContent.trim())))
     .map(r => ({
       SerialNo: serialNo.value,
       ProcessEngineer: r.processEngineer && r.processEngineer.trim() ? r.processEngineer.trim() : null,
@@ -133,7 +167,8 @@ async function sendNcms() {
       // send local time string (no Z) instead of Date object which serializes as UTC
       StartTime: formatLocalIso(start),
       EndTime: formatLocalIso(end),
-      NcmAction: r.ncmAction && r.ncmAction.trim() ? r.ncmAction.trim() : null
+      // Transitional: send both new and legacy names
+      CallingContent: r.callingContent && r.callingContent.trim() ? r.callingContent.trim() : null,
     }))
   if (!payload.length) {
     alert('Please add at least one NCM entry to send')
@@ -147,7 +182,7 @@ async function sendNcms() {
     let sentIndex = 0
     for (let i = 0; i < ncmRows.value.length; i++) {
       const r = ncmRows.value[i]
-      if (!r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.ncmAction && r.ncmAction.trim()))) {
+      if (!r.sent && ((r.processEngineer && r.processEngineer.trim()) || (r.callingContent && r.callingContent.trim()))) {
         // mark as sent
         r.sent = true
         sentIndex++
@@ -168,22 +203,59 @@ if (props.initialWorkHourId) {
   currentWorkHourId.value = props.initialWorkHourId
 }
 
-// watch for parent updates
-watch(() => props.initialWorkHourId, (nv) => {
-  console.debug('TimerClock: initialWorkHourId prop changed ->', nv, 'old currentWorkHourId=', currentWorkHourId.value)
-  currentWorkHourId.value = nv || null
-})
+// helper: try to restore existing session for current WorkHourId
+async function tryRestoreSessionForWorkHour() {
+  if (!currentWorkHourId.value) return
+  try {
+    console.log('TimerClock: attempting to restore session for WorkHourId', currentWorkHourId.value)
+    const res = await axios.get(`/api/WorkHours/session-by-workhour/${currentWorkHourId.value}`)
+    const session = res.data
+    // API returns camelCase JSON (sessionId, elapsedSeconds, state)
+    if (session && session.sessionId) {
+      // populate session id and sync elapsed seconds
+      sessionId.value = session.sessionId
+      const serverElapsed = Number(session.elapsedSeconds ?? 0)
+      // normalize activeClock from server into client values 'active' or 'paused'
+      if (session.activeClock && (session.activeClock === 'Active' || session.activeClock === 'active')) {
+        activeClock.value = 'active'
+      } else {
+        activeClock.value = 'paused'
+      }
+
+      console.log('TimerClock: restored session', sessionId.value, 'with elapsed seconds', serverElapsed)
+      if ((Number(workTime.value) || 0) < serverElapsed) workTime.value = serverElapsed
+
+      // if server says session is Working and elapsed > 0 then start the local timer automatically
+      const state = (session.state || session.State || '').toString()
+      if ((state === 'Working' || state === 'working') && serverElapsed > 0 && activeClock.value === 'active') {
+        if (isCountingTimerActive) isCountingTimerActive.value = true
+        if (timer) clearInterval(timer)
+        timer = setInterval(() => { if (activeClock.value === 'active') workTime.value++ }, 1000)
+      }
+
+      // start heartbeat loop (always run heartbeat to keep server session in sync even when paused)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      heartbeatTimer = setInterval(() => sendHeartbeat(), HEARTBEAT_INTERVAL_MS)
+    }
+  } catch (err) {
+    // 404 is expected when no session exists; ignore
+    if (err && err.response && err.response.status === 404) return
+    console.error('Failed to restore session for WorkHourId', currentWorkHourId.value, err)
+  }
+}
 
 // Start overall timer on mount, clean up on unmount
 onMounted(() => {
     // Only fetch aggregates on mount; do not toggle global isCountingTimerActive here
     void fetchAggregates()
     void fetchProcessEngineers()
+    // try to restore any existing session for the provided WorkHourId
+    void tryRestoreSessionForWorkHour()
 })
 onBeforeUnmount(() => {
   // ensure we clear local timer and global flag if active
   if (timer) clearInterval(timer)
-  if (isCountingTimerActive && activeClock.value === '') isCountingTimerActive.value = false
+  if (isCountingTimerActive && activeClock.value === 'paused') isCountingTimerActive.value = false
 })
 
 
@@ -201,7 +273,7 @@ async function setWorkingBackend(workHourId) {
     // Call the by-id endpoint which directly updates the WorkHour state
     const res = await axios.post('/api/WorkHours/set-working-by-id', payload)
     // backend acknowledges the update; keep id in state
-    console.log('Set working-by-id response', res.data)
+    console.log('Response of set-working-by-id', res.data)
     return workHourId
   } catch (err) {
     console.error('Failed to set working state by id', err)
@@ -211,35 +283,37 @@ async function setWorkingBackend(workHourId) {
 }
 
 
-function startClock(type) {
+function startClock() {
   // Prevent starting new clocks if the current session has already been submitted
   if (submitted.value) {
     alert('Work hours already submitted for this session. Reset clocks to start again.')
     return
   }
+  console.info("PreState: activeClock=", activeClock.value)
 
   // If clicking the active clock, pause it
-  if (activeClock.value === type) {
+  if (activeClock.value === 'active'){
     if (timer) clearInterval(timer)
     timer = null
-    activeClock.value = ''
-    if (isCountingTimerActive) isCountingTimerActive.value = false
-    return
+    // Set paused state and notify server immediately via heartbeat
+    activeClock.value = 'paused'
+    // send heartbeat so server records ActiveClock='paused' and current elapsed
+    void sendHeartbeat()
   }
   // Otherwise, start the selected clock
-  if (timer) clearInterval(timer)
-  activeClock.value = type
-  if (isCountingTimerActive) isCountingTimerActive.value = true
-  timer = setInterval(() => {
-    if (activeClock.value === 'work') workTime.value++
-  }, 1000)
+  else if (activeClock.value === 'paused'){
+    if (timer) clearInterval(timer)
+    activeClock.value = 'active'
+    if (isCountingTimerActive) isCountingTimerActive.value = true
+    timer = setInterval(() => {
+      if (activeClock.value === 'active') workTime.value++
+    }, 1000)
+  } 
 
-  // If starting the work clock, ensure we have a WorkHour id but avoid extra lookup if parent provided it
-  if (type === 'work') {
-      // Update WorkHour to Working state
-      (async () => {
-        await setWorkingBackend(currentWorkHourId.value)
-      })()
+  console.info("PostState: activeClock=", activeClock.value)
+  // If starting the work clock, ensure we have a WorkHour id and mark WorkHour as Working
+  if (activeClock.value === 'active') {
+    void setWorkingBackend(currentWorkHourId.value)
   }
 }
 
@@ -254,30 +328,25 @@ async function submitWorkHours() {
     const id = currentWorkHourId.value 
     if (!id) {
       alert('No WorkHour record found to complete')
-      return
-    }
-
-    if (!window.confirm('This will submit your work hour, and the operation can not be revert! Continue?')) {
-      return
+      return false
     }
 
     // compute hours from timers (rounded to 2 decimals)
     const effectiveHours = Math.round((workTime.value / 3600) * 100) / 100
-    const reportedNcmHours = Math.round((ncmTime.value / 3600) * 100) / 100
 
     // build payload
     const payload = { WorkHourId: id, WorkerName: (username && username.value) ? username.value : 'Guest', EffectiveHours: effectiveHours }
-   
+
     payload.ProcessEngineer = processEngineer.value || null
-    payload.NcmAction = ncmAction.value || null
-    
+    // Send both new and legacy property names until backend drops legacy
+    payload.CallingContent = callingContent.value || null
 
     const res = await axios.post('/api/WorkHours/complete', payload)
     console.log('Complete response', res.data)
     // stop timer locally
     if (timer) clearInterval(timer)
     timer = null
-    activeClock.value = ''
+    activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
 
     // keep timers and NCM metadata visible but mark as submitted and dim UI
@@ -288,10 +357,13 @@ async function submitWorkHours() {
     // emit an event as well so parent can react if provide/inject didn't reach it
     try { emit('work-submitted') } catch (e) { /* ignore in older runtimes */ }
 
-    alert('Work hour completed.')
+    // show fade-out message instead of blocking alert
+    showTransientMessage('Work hour completed.')
+    return true
   } catch (err) {
     console.error('Failed to complete work hour', err)
     alert('Failed to complete work hour')
+    return false
   }
 }
 
@@ -314,12 +386,30 @@ async function resetClocks() {
         await axios.post('/api/WorkHours/reset', { WorkHourId: id })
         console.debug('TimerClock.resetClocks: reset request completed for WorkHourId=', id)
       }
+
+      // Ensure any heartbeat loop is stopped and any server-side session is removed
+      try {
+        // Prefer explicit delete-session endpoint to remove manager + DB record
+        if (sessionId.value) {
+          await axios.post('/api/WorkHours/delete-session', { SessionId: sessionId.value })
+        } else if (id) {
+          await axios.post('/api/WorkHours/delete-session', { WorkHourId: id })
+        }
+      } catch (delErr) {
+        // non-fatal; log for diagnostics
+        console.warn('TimerClock.resetClocks: delete-session failed', delErr)
+      }
+
+      // stop client-side heartbeat and clear session reference unconditionally
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+      sessionId.value = null
+
     } catch (err) {
       console.error('Failed to reset workhour', err)
     }
     workTime.value = 0
     ncmTime.value = 0
-    activeClock.value = ''
+    activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
     if (timer) clearInterval(timer)
     // clear submitted state so user can start again
@@ -336,22 +426,172 @@ async function resetClocks() {
 watch(serialNo, (nv) => {
   void fetchAggregates()
 })
-// also watch selected serial to clear timers when serial changes externally
+// also watch selected serial to clear timers when serial changes
 watch(serialNo, (nv, ov) => {
   if (nv && nv !== ov) {
     // stop any running timers when switching serials
     if (timer) clearInterval(timer)
     timer = null
-    activeClock.value = ''
+    activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
     currentWorkHourId.value = null
     // clear ncm inputs when serial changes
     processEngineer.value = ''
-    ncmAction.value = ''
+    callingContent.value = ''
     showNcmInputs.value = false
     // clear submitted state when switching systems
     submitted.value = false
   }
+})
+
+// watch for changes to the parent-provided initialWorkHourId so we can switch
+// to a different existing WorkHour and attempt to resume its session
+watch(() => props.initialWorkHourId, (nv, ov) => {
+  if (nv && nv !== ov) {
+    currentWorkHourId.value = nv
+    void tryRestoreSessionForWorkHour()
+  } else if (nv == null) {
+    // parent cleared the id — clear local state
+    currentWorkHourId.value = null
+  }
+})
+
+
+const sessionId = ref(null)
+let heartbeatTimer = null
+const HEARTBEAT_INTERVAL_MS = 15000 // 15s
+// Milliseconds to wait for heartbeat response before marking disconnected
+const HEARTBEAT_TIMEOUT_MS = 5000 // 5s
+const disconnected = ref(false)
+
+// Optional: count consecutive failures if you want backoff or auto-retry behavior
+let consecutiveHeartbeatFailures = 0
+
+async function startSessionIfNeeded() {
+  if (sessionId.value) return
+  try {
+    const res = await axios.post('/api/WorkHours/start-session', {
+      WorkHourId: currentWorkHourId.value,
+      WorkerName: (username && username.value) ? username.value : 'Guest',
+      SerialNo: serialNo.value,
+      ProcessName: process.value,
+      ElapsedSeconds: workTime.value,
+      ActiveClock: activeClock.value === 'active' ? 'active' : 'paused', // send 'paused' to DB when not active
+      MetadataJson: JSON.stringify({ note: 'started from client' }),
+      State: 'Working'
+    })
+    sessionId.value = res.data?.sessionId || null
+
+    // If server returns a persisted elapsedSeconds (resuming an existing session), use it.
+    const serverElapsed = res.data?.elapsedSeconds
+    if (typeof serverElapsed === 'number') {
+      // Avoid clobbering a larger client-side counter (e.g. if client already advanced)
+      if ((Number(workTime.value) || 0) < serverElapsed) {
+        workTime.value = serverElapsed
+      }
+    }
+
+    // start periodic heartbeat
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    heartbeatTimer = setInterval(() => sendHeartbeat(), HEARTBEAT_INTERVAL_MS)
+  } catch (err) {
+    console.error('Failed to start session', err)
+  }
+}
+
+// Replace sendHeartbeat to read server's response and sync elapsedSeconds/sessionId
+async function sendHeartbeat() {
+  if (!sessionId.value) return
+  try {
+    const res = await axios.post('/api/WorkHours/session-heartbeat', {
+      SessionId: sessionId.value,
+      ElapsedSeconds: workTime.value,
+      ActiveClock: activeClock.value === 'active' ? 'active' : 'paused', // send 'paused' to DB when not active
+      MetadataJson: JSON.stringify({ ncmCount: ncmRows.value.length }),
+      State: submitted.value ? 'Completed' : 'Working'
+    }, { timeout: HEARTBEAT_TIMEOUT_MS })
+
+    // on success, clear disconnected state and reset failure counter
+    disconnected.value = false
+    consecutiveHeartbeatFailures = 0
+
+    // If server responded with updated elapsedSeconds, use it (but only if it's larger)
+    const serverElapsed = res?.data?.elapsedSeconds
+    if (typeof serverElapsed === 'number') {
+      if ((Number(workTime.value) || 0) < serverElapsed) {
+        workTime.value = serverElapsed
+      }
+    }
+
+    // Server may also return a canonical sessionId (e.g., if manager created or rotated it)
+    const returnedSessionId = res?.data?.sessionId
+    if (returnedSessionId && returnedSessionId !== sessionId.value) {
+      sessionId.value = returnedSessionId
+    }
+  } catch (err) {
+    console.error('Heartbeat failed', err)
+    // mark disconnected when request times out or network fails
+    consecutiveHeartbeatFailures++
+    if (consecutiveHeartbeatFailures >= 1) {
+      disconnected.value = true
+    }
+  }
+}
+
+async function stopSession() {
+  if (!sessionId.value) return
+  try {
+    await axios.post('/api/WorkHours/complete-session', { SessionId: sessionId.value, ElapsedSeconds: workTime.value })
+  } catch (err) {
+    console.error('Failed to complete session', err)
+  } finally {
+    sessionId.value = null
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null }
+  }
+}
+
+// Hook into startClock and submit/reset to manage session lifecycle
+const originalStartClock = startClock
+startClock = function() {
+  originalStartClock()
+  // when starting work clock, ensure server session exists
+  if (activeClock.value === 'active') {
+    void startSessionIfNeeded()
+  }
+}
+
+// after submitWorkHours completes we mark session completed
+const originalSubmit = submitWorkHours
+submitWorkHours = async function() {
+  // Call original submit and only proceed with final heartbeat/stop if a submission actually occurred
+  try {
+    const didSubmit = await originalSubmit()
+    if (!didSubmit) return
+  } catch (e) {
+    // if original throws, avoid proceeding
+    console.error('submit wrapper: original submit failed', e)
+    return
+  }
+
+  // send final heartbeat and stop session tracking
+  try {
+    await sendHeartbeat()
+  } catch {}
+  await stopSession()
+}
+
+// reset also stops session
+const originalReset = resetClocks
+resetClocks = async function() {
+  // originalReset already handles delete-session and clears heartbeatTimer/sessionId
+  await originalReset()
+}
+
+// ensure heartbeats stop on unmount
+onBeforeUnmount(() => {
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
+  // logoff doesn't submit current work.
+  //if (sessionId.value) { void stopSession() }
 })
 </script>
 
@@ -361,6 +601,10 @@ watch(serialNo, (nv, ov) => {
       <span><strong>Serial No.:</strong> {{ serialNo }}</span>      
       <span><strong>WorkHour Accumulated:</strong> {{ workHourOverall }}</span>
       <span><strong>NCM Hours:</strong> {{ ncmHours }}</span>
+    </div>
+    <!-- Disconnection banner: shown when heartbeats fail -->
+    <div v-if="disconnected" class="disconnected-banner" role="alert" aria-live="assertive">
+      ⚠️ Disconnected from Server. Please check your network!
     </div>
     <div class="workhour-seat-info">
       <span><strong>Process:</strong> {{ process }}</span>
@@ -373,14 +617,14 @@ watch(serialNo, (nv, ov) => {
     <div class="workhour-clocks-row">
       <div class="clock-block">
         <div class="clock-label">Effective Working Time</div>
-        <div class="clock-time" :class="{active: activeClock === 'work', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
-        <button class="circle-wide-btn" :class="{active: activeClock === 'work', dimmed: isCountingTimerActive && activeClock !== 'work'}" :disabled="submitted" @click="startClock('work')" title="Work">Work</button>
+        <div class="clock-time" :class="{active: activeClock === 'active', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
+        <button class="circle-wide-btn" :class="{active: activeClock === 'active', dimmed: activeClock !== 'paused'}" :disabled="submitted" @click="startClock()" title="Work">Work</button>
       </div>
       
     </div>
     <div class="reset-btn-row">
       <span class="reset-btn-spacer"></span>
-      <button class="submit-btn" @click="submitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
+      <button class="submit-btn" @click="requestSubmitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
       <span class="reset-btn-spacer"></span>
       <button class="reset-btn" @click="resetClocks" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Will reset Work Hour Clock!">⟳</button>
     </div>
@@ -399,8 +643,8 @@ watch(serialNo, (nv, ov) => {
               <option v-for="(opt, i) in processEngineerOptions" :key="i" :value="opt">{{ opt }}</option>
             </select>
 
-            <label class="ncm-input-label" style="flex:0 0 120px;">NCM Action:</label>
-            <input v-model="row.ncmAction" class="ncm-input" placeholder="Enter action" :disabled="row.sent" />
+            <label class="ncm-input-label" style="flex:0 0 120px;">Calling Content:</label>
+            <input v-model="row.callingContent" class="ncm-input" placeholder="Enter content" :disabled="row.sent" />
 
             <button class="ncm-row-btn" @click="removeNcmRow(idx)" title="Remove" v-if="ncmRows.length > 1 && !row.sent">-</button>
             <button class="ncm-row-btn" @click="addNcmRow" title="Add" v-if="idx === ncmRows.length - 1">+</button>
@@ -412,6 +656,20 @@ watch(serialNo, (nv, ov) => {
         </div>
       </div>
     </div>
+    <!-- Confirmation modal for submitting work hours -->
+    <div v-if="showSubmitConfirm" class="confirm-overlay" role="dialog" aria-modal="true">
+      <div class="confirm-dialog">
+        <div class="confirm-title">Confirm Submission</div>
+        <div class="confirm-body">This will submit your work hour, and the operation cannot be reverted. Continue?</div>
+        <div class="confirm-buttons">
+          <button ref="confirmCancelBtn" class="confirm-btn cancel" @click="cancelSubmit">Cancel</button>
+          <button class="confirm-btn confirm" @click="confirmSubmit">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transient fade-out message -->
+    <div v-if="messageVisible" class="fade-message" role="status" aria-live="polite">{{ messageText }}</div>
   </div>
 </template>
 
@@ -545,7 +803,7 @@ watch(serialNo, (nv, ov) => {
   transform: translateY(1px) scale(0.98);
 }
 
-.circle-wide-btn:disabled, .circle-wide-btn.dimmed {
+.circle-wide-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -721,4 +979,56 @@ watch(serialNo, (nv, ov) => {
 .chevron.open {
   transform: rotate(180deg);
 }
+.disconnected-banner {
+  background: #fff4f4;
+  color: #7a1f1f;
+  border: 1px solid #f5c6cb;
+  padding: 0.6rem 1rem;
+  margin: 0.6rem 0;
+  border-radius: 6px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.35);
+  z-index: 1000;
+}
+.confirm-dialog {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.2rem;
+  width: 420px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.confirm-title { font-weight: 700; color: #e74c3c; }
+.confirm-body { color: #333; }
+.confirm-buttons { display:flex; justify-content:flex-end; gap:0.5rem; }
+.confirm-btn { padding: 0.5rem 0.9rem; border-radius: 6px; border: none; cursor: pointer; }
+.confirm-btn.cancel { background: #eee; color: #333; }
+.confirm-btn.confirm { background: #e74c3c; color: #fff; }
+
+.fade-message {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: #42b883;
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  opacity: 1;
+  transition: opacity 0.45s ease-in-out, transform 0.45s ease-in-out;
+}
+.fade-message[style*="display: none"] { opacity: 0 }
+.fade-message[aria-hidden="true"] { opacity: 0 }
 </style>

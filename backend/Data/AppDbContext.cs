@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using backend.DbModel;
+using System;
+using System.IO;
+using Microsoft.Extensions.Configuration;
 
 namespace backend.Data
 {
@@ -9,10 +12,62 @@ namespace backend.Data
         public DbSet<WorkHour> WorkHours { get; set; }
         public DbSet<NcmTime> NcmTimes { get; set; }
         public DbSet<User> Users { get; set; }
+        public DbSet<WorkSession> WorkSessions { get; set; }
+    public DbSet<Order> Orders { get; set; }
+
+        //overwritten by appsettings.json if present
         public static string DbProvider { get; set; } = "sqlite";
         public static string ConnectionString { get; set; } = "Data Source=workhour.db";
+
+        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+        {
+            // Ensure database and tables are created
+            Database.EnsureCreated();
+        }
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
+            // If the DbContext was configured via DI (AddDbContext) the optionsBuilder will already be configured.
+            if (optionsBuilder.IsConfigured) return;
+
+            // Prefer configuration in appsettings.json (deployed next to the exe). This allows changing DbPath
+            // via appsettings.json when deploying the service.
+            try
+            {
+                var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+                var builder = new ConfigurationBuilder();
+                if (File.Exists(configPath))
+                {
+                    builder.SetBasePath(AppContext.BaseDirectory).AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+                    var cfg = builder.Build();
+                    var configuredDbPath = cfg["DbPath"];
+                    var configuredProvider = cfg["DbProvider"];
+
+                    if (!string.IsNullOrWhiteSpace(configuredDbPath))
+                    {
+                        var dbPath = Path.IsPathRooted(configuredDbPath) ? configuredDbPath : Path.Combine(AppContext.BaseDirectory, configuredDbPath);
+                        var conn = $"Data Source={dbPath}";
+                        Console.WriteLine($"Using database path from appsettings.json: {dbPath}");
+                        var provider = string.IsNullOrWhiteSpace(configuredProvider) ? DbProvider : configuredProvider;
+                        if (provider?.ToLowerInvariant() == "sqlite")
+                        {
+                            optionsBuilder.UseSqlite(conn);
+                            return;
+                        }
+                        else if (provider?.ToLowerInvariant() == "sqlserver")
+                        {
+                            optionsBuilder.UseSqlServer(conn);
+                            return;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore and fall through to static fallback
+            }
+
+            // Fallback to static configuration present for compatibility with older startup code.
             if (DbProvider == "sqlite")
             {
                 optionsBuilder.UseSqlite(ConnectionString);
@@ -22,6 +77,7 @@ namespace backend.Data
                 optionsBuilder.UseSqlServer(ConnectionString);
             }
         }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Product>()
@@ -36,18 +92,52 @@ namespace backend.Data
                 .WithMany(p => p.NcmTimes)
                 .HasForeignKey(n => n.ProductId);
 
+                                    // Orders: linked one-to-one to Product by SerialNo string (principal key)
+                        modelBuilder.Entity<Order>(eb =>
+                        {
+                                eb.HasKey(o => o.Id);
+                                eb.Property(o => o.Id).ValueGeneratedOnAdd();
+                                eb.Property(o => o.SerialNo).HasMaxLength(100);
+                                            // enforce one order per product by making SerialNo unique on Orders
+                                            eb.HasIndex(o => o.SerialNo).IsUnique();
+                                eb.HasIndex(o => o.OrderNumber).IsUnique();
+                                eb.Property(o => o.Customer).HasMaxLength(200);
+                                eb.Property(o => o.ProvinceCity).HasMaxLength(200);
+                                eb.Property(o => o.Address).HasMaxLength(500);
+                                eb.Property(o => o.DeliveryDate).HasColumnType("TEXT");
+
+                                            eb.HasOne(o => o.Product)
+                                                .WithOne(p => p.Order)
+                                                .HasPrincipalKey<Product>(p => p.SerialNo)
+                                                .HasForeignKey<Order>(o => o.SerialNo);
+                        });
+
             // Ensure State column exists and has default value
             modelBuilder.Entity<WorkHour>(eb =>
             {
                 eb.Property(w => w.State).HasMaxLength(50).HasDefaultValue("NotStarted");
                 eb.Property(w => w.StartTimeActual).HasDefaultValueSql("CURRENT_TIMESTAMP");
                 eb.Property(w => w.EndTimeActual).HasDefaultValueSql("NULL");
+                eb.Property(w => w.Location).HasMaxLength(200);
             });
 
             modelBuilder.Entity<NcmTime>(eb =>
             {
                 eb.Property(n => n.State).HasMaxLength(50).HasDefaultValue("NotStarted");
-                eb.Property(n => n.NcmAction).HasMaxLength(500);
+                eb.Property(n => n.CallingContent).HasMaxLength(500); // renamed from NcmAction
+                eb.Property(n => n.CallType).HasMaxLength(100);
+                eb.Property(n => n.Actions).HasMaxLength(500);
+            });
+
+            // WorkSession snapshots for client-server session management
+            modelBuilder.Entity<WorkSession>(eb =>
+            {
+                eb.ToTable("WorkSession");
+                eb.HasKey(ws => ws.Id);
+                eb.Property(ws => ws.SessionId).HasMaxLength(100).IsRequired();
+                eb.HasIndex(ws => ws.SessionId).IsUnique();
+                eb.Property(ws => ws.State).HasMaxLength(50).HasDefaultValue("NotStarted");
+                eb.Property(ws => ws.MetadataJson).HasColumnType("TEXT");
             });
 
             // Users table configuration
