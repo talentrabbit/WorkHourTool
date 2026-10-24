@@ -59,12 +59,15 @@
         <div class="modal-header">
               <div class="modal-title-block">
                 <div class="serial">SerialNo: <strong>{{ productBrief.serialNo || editing.serialNo }}</strong></div>
-                <div class="brief">ProductLine: <strong>{{ productBrief.productLine || '-' }}</strong> · SystemType: <strong>{{ productBrief.systemType || editing.systemType || '-' }}</strong></div>
               </div>
               <button class="close-btn" @click="closeEditor">×</button>
             </div>
 
         <div class="modal-body">
+          <div class="product-info">
+            <span>ProductLine: <strong>{{ productBrief.productLine || '-' }}</strong></span>
+            <span>SystemType: <strong>{{ productBrief.systemType || editing.systemType || '-' }}</strong></span>
+          </div>
           <div class="form-row" v-if="showAll">
             <label>Process Engineer</label>
             <select v-model="editing.processEngineer">
@@ -85,8 +88,8 @@
             </select>
           </div>
           <div class="form-row">
-            <label>Actions</label>
-            <textarea v-model="editing.actions" rows="3"></textarea>
+            <label>State</label>
+            <input v-model="editing.state" />
           </div>
           <div class="form-grid">
             <div class="form-row">
@@ -103,12 +106,12 @@
             </div>
           </div>
           <div class="form-row">
-            <label>State</label>
-            <input v-model="editing.state" />
+            <label>Actions</label>
+            <textarea v-model="editing.actions" rows="2"></textarea>
           </div>
           <div class="form-row">
             <label>Content</label>
-            <textarea v-model="editing.callingContent" rows="3"></textarea>
+            <textarea v-model="editing.callingContent" rows="2"></textarea>
           </div>
         </div>
 
@@ -481,7 +484,7 @@ function formatNcmHours(ncm, start, end) {
 </script>
 
 <style scoped>
-.ncm-container { max-width: 96%; width: 75vw;  margin: 1.5rem 0 1.5rem 2rem; padding: 1rem; background: #fff; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
+.ncm-container { max-width: 100%; width: 100%; min-width: 0; margin: 0; padding: 1rem; background: #fff; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
 /* Scrollable table wrapper: prevents the table from exceeding the container and enables scrolling */
 .ncm-table-wrap { max-width: 100%; max-height: 60vh; overflow: auto; }
 .ncm-table { width: 100%; max-width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -564,15 +567,19 @@ button:hover { opacity: 0.95 }
 .modal-header { position: relative; background: #FFF4E6; padding: 14px 18px; border-bottom: 1px solid #f1dfd1; min-height: 45px; }
 .modal-header .modal-title-block { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; max-width: calc(100% - 140px); padding: 0 12px; line-height: 1.1; }
 .modal-header .serial { font-size: 1rem; color: #6a3a12; }
-.modal-header .brief { font-size: 0.9rem; color: #8a4b1a; margin-top: 2px; }
 .modal-header .close-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; color: #8a4b1a; font-size: 22px; line-height: 1; padding: 4px 8px; border-radius: 6px; }
 .modal-header .close-btn:hover { background: rgba(0,0,0,0.06); }
-.modal-body { padding: 14px 16px; overflow: auto; font-weight: 400; }
-.form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.modal-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 12px 16px; overflow: auto; font-weight: 400; }
+.product-info { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 24px; color: #8a4b1a; overflow-wrap: anywhere; }
+.form-row { display: flex; flex-direction: column; min-width: 0; gap: 4px; margin: 0; }
 .form-row > label { font-weight: 400; color: #5b3312; }
-.form-row > input, .form-row > select, .form-row > textarea { border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; }
-.form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.modal-footer { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid #eee; }
+.form-row > input, .form-row > select, .form-row > textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 6px 8px; }
+.form-row > textarea { resize: vertical; }
+.form-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(100px, 0.65fr); gap: 10px; }
+.modal-footer { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid #eee; }
+@media (max-width: 640px) {
+  .modal-body, .form-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .modal-footer .right-actions { display: flex; gap: 10px; }
 .modal-footer .left-actions { margin-right: auto; }
 .modal-footer .secondary { background: #e6e6e6; color: #333; }

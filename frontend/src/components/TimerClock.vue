@@ -21,6 +21,50 @@ const workHourOverall = ref('00:00')
 const ncmHours = ref('0:00')
 const workHourMean = ref('0:00')
 
+const now = ref(new Date())
+const dailyWorkHours = ref([])
+const totalsUnavailable = ref(false)
+const localStart = ref(null)
+const localEnd = ref(null)
+let wallClockTimer = null
+const currentDateTime = computed(() => formatLocalIso(now.value)?.replace('T', ' '))
+const currentRecord = computed(() => dailyWorkHours.value.find(w => String(w.id) === String(currentWorkHourId.value)))
+const workLocation = computed(() => currentRecord.value?.location || 'Not specified')
+const todayTotal = computed(() => {
+  const startOfDay = new Date(now.value); startOfDay.setHours(0, 0, 0, 0)
+  const endOfDay = new Date(startOfDay); endOfDay.setDate(endOfDay.getDate() + 1)
+  let total = 0
+  const rows = [...dailyWorkHours.value]
+  if (localStart.value && !currentRecord.value) {
+    rows.push({ id: currentWorkHourId.value, workerName: username.value, startTimeActual: localStart.value })
+  }
+  for (const row of rows) {
+    if ((row.workerName || '').trim().toLowerCase() !== (username.value || '').trim().toLowerCase()) continue
+    const isCurrent = String(row.id) === String(currentWorkHourId.value)
+    const start = new Date(row.startTimeActual || (isCurrent && localStart.value) || NaN)
+    const end = new Date(row.endTimeActual || (isCurrent && localEnd.value) || now.value)
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) continue
+    total += Math.max(0, Math.min(end.getTime(), endOfDay.getTime(), now.value.getTime()) - Math.max(start.getTime(), startOfDay.getTime())) / 1000
+  }
+  return formatTime(total)
+})
+
+async function fetchDailyWorkHours() {
+  try {
+    const res = await axios.get('/api/WorkHours/all-workhours')
+    dailyWorkHours.value = (Array.isArray(res.data) ? res.data : []).map(w => ({
+      id: w.id ?? w.Id,
+      workerName: w.workerName ?? w.WorkerName,
+      location: w.location ?? w.Location,
+      startTimeActual: w.startTimeActual ?? w.StartTimeActual,
+      endTimeActual: w.endTimeActual ?? w.EndTimeActual
+    }))
+    totalsUnavailable.value = false
+  } catch {
+    totalsUnavailable.value = true
+  }
+}
+
 // Helper to format fractional hours (e.g. 13.5) into H:MM
 function hoursToHHMM(hours) {
   if (hours == null) return '0:00'
@@ -246,6 +290,8 @@ async function tryRestoreSessionForWorkHour() {
 
 // Start overall timer on mount, clean up on unmount
 onMounted(() => {
+  wallClockTimer = setInterval(() => { now.value = new Date() }, 1000)
+  void fetchDailyWorkHours()
     // Only fetch aggregates on mount; do not toggle global isCountingTimerActive here
     void fetchAggregates()
     void fetchProcessEngineers()
@@ -253,6 +299,8 @@ onMounted(() => {
     void tryRestoreSessionForWorkHour()
 })
 onBeforeUnmount(() => {
+  if (wallClockTimer) clearInterval(wallClockTimer)
+  if (messageTimeout) clearTimeout(messageTimeout)
   // ensure we clear local timer and global flag if active
   if (timer) clearInterval(timer)
   if (isCountingTimerActive && activeClock.value === 'paused') isCountingTimerActive.value = false
@@ -283,38 +331,34 @@ async function setWorkingBackend(workHourId) {
 }
 
 
-function startClock() {
+async function startClock() {
   // Prevent starting new clocks if the current session has already been submitted
   if (submitted.value) {
     alert('Work hours already submitted for this session. Reset clocks to start again.')
     return
   }
-  console.info("PreState: activeClock=", activeClock.value)
-
-  // If clicking the active clock, pause it
-  if (activeClock.value === 'active'){
-    if (timer) clearInterval(timer)
-    timer = null
-    // Set paused state and notify server immediately via heartbeat
-    activeClock.value = 'paused'
-    // send heartbeat so server records ActiveClock='paused' and current elapsed
-    void sendHeartbeat()
-  }
-  // Otherwise, start the selected clock
-  else if (activeClock.value === 'paused'){
-    if (timer) clearInterval(timer)
+  if (activeClock.value === 'active' || starting.value) return
+  starting.value = true
+  try {
+    if (!await setWorkingBackend(currentWorkHourId.value)) return
+    if (!localStart.value) localStart.value = new Date()
     activeClock.value = 'active'
     if (isCountingTimerActive) isCountingTimerActive.value = true
-    timer = setInterval(() => {
-      if (activeClock.value === 'active') workTime.value++
-    }, 1000)
-  } 
-
-  console.info("PostState: activeClock=", activeClock.value)
-  // If starting the work clock, ensure we have a WorkHour id and mark WorkHour as Working
-  if (activeClock.value === 'active') {
-    void setWorkingBackend(currentWorkHourId.value)
+    if (timer) clearInterval(timer)
+    timer = setInterval(() => { if (activeClock.value === 'active') workTime.value++ }, 1000)
+    void fetchDailyWorkHours()
+  } finally {
+    starting.value = false
   }
+}
+
+const starting = ref(false)
+function pauseClock() {
+  if (submitted.value || activeClock.value !== 'active') return
+  if (timer) clearInterval(timer)
+  timer = null
+  activeClock.value = 'paused'
+  void sendHeartbeat()
 }
 
 function switchNcmInputs() {
@@ -343,6 +387,8 @@ async function submitWorkHours() {
 
     const res = await axios.post('/api/WorkHours/complete', payload)
     console.log('Complete response', res.data)
+    localEnd.value = new Date(res.data?.endTimeActual || Date.now())
+    void fetchDailyWorkHours()
     // stop timer locally
     if (timer) clearInterval(timer)
     timer = null
@@ -368,13 +414,13 @@ async function submitWorkHours() {
 }
 
 async function resetClocks() {
+  const id = currentWorkHourId.value
   const password = prompt('Enter password to reset all clocks:')
   // Hardcoded password for now; move to backend later
   const correctPassword = 'reset';
   if (password === correctPassword) {
     try {
       // snapshot current id for logging/preserve
-      const id = currentWorkHourId.value
       console.debug('TimerClock.resetClocks: starting reset for WorkHourId=', id)
 
       // attempt to resolve one (will set to Working briefly)
@@ -408,6 +454,9 @@ async function resetClocks() {
       console.error('Failed to reset workhour', err)
     }
     workTime.value = 0
+    localStart.value = null
+    localEnd.value = null
+    void fetchDailyWorkHours()
     ncmTime.value = 0
     activeClock.value = 'paused'
     if (isCountingTimerActive) isCountingTimerActive.value = false
@@ -552,8 +601,8 @@ async function stopSession() {
 
 // Hook into startClock and submit/reset to manage session lifecycle
 const originalStartClock = startClock
-startClock = function() {
-  originalStartClock()
+startClock = async function() {
+  await originalStartClock()
   // when starting work clock, ensure server session exists
   if (activeClock.value === 'active') {
     void startSessionIfNeeded()
@@ -596,37 +645,45 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workhour-header-row">
-    <div class="workhour-system-info">
-      <span><strong>Serial No.:</strong> {{ serialNo }}</span>      
-      <span><strong>WorkHour Accumulated:</strong> {{ workHourOverall }}</span>
-      <span><strong>NCM Hours:</strong> {{ ncmHours }}</span>
-    </div>
+  <section class="timer-dashboard" aria-label="Work hour counting tool">
+    <header class="dashboard-topbar">
+      <div class="dashboard-identity">
+        <strong>{{ username }}</strong>
+        <span>Serial No. <strong>{{ serialNo }}</strong></span>
+        <span>Work Location <strong>{{ workLocation }}</strong></span>
+      </div>
+      <time :datetime="formatLocalIso(now)">{{ currentDateTime }}</time>
+    </header>
     <!-- Disconnection banner: shown when heartbeats fail -->
     <div v-if="disconnected" class="disconnected-banner" role="alert" aria-live="assertive">
       ⚠️ Disconnected from Server. Please check your network!
     </div>
-    <div class="workhour-seat-info">
-      <span><strong>Process:</strong> {{ process }}</span>
-      <span><strong>Worker:</strong> {{ username }}</span>
-      <span><strong>WorkHour Mean:</strong> {{ workHourMean }}</span>
-    </div>
-  </div>
-  <div class="workhour-panel">
-    <div class="workhour-panel-title">Today's working</div>
-    <div class="workhour-clocks-row">
-      <div class="clock-block">
-        <div class="clock-label">Effective Working Time</div>
-        <div class="clock-time" :class="{active: activeClock === 'active', 'submitted-dim': submitted}">{{ formatTime(workTime) }}</div>
-        <button class="circle-wide-btn" :class="{active: activeClock === 'active', dimmed: activeClock !== 'paused'}" :disabled="submitted" @click="startClock()" title="Work">Work</button>
+    <div class="dashboard-body">
+      <div class="timer-display" :class="{ running: activeClock === 'active', 'submitted-dim': submitted }">
+        <div class="timer-orbit" aria-hidden="true"></div>
+        <div class="timer-digits" role="timer">{{ formatTime(workTime) }}</div>
+        <div class="timer-caption">Effective Working Time</div>
+        <span class="timer-state">{{ submitted ? 'Submitted' : activeClock === 'active' ? 'Running' : 'Paused' }}</span>
       </div>
-      
-    </div>
-    <div class="reset-btn-row">
-      <span class="reset-btn-spacer"></span>
-      <button class="submit-btn" @click="requestSubmitWorkHours" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Submit Work Hours">Submit Work Hours</button>
-      <span class="reset-btn-spacer"></span>
-      <button class="reset-btn" @click="resetClocks" :disabled="submitted" :class="{'submitted-dim': submitted}" title="Will reset Work Hour Clock!">⟳</button>
+      <div class="task-summary">
+        <div><span>Current Process</span><strong>{{ process }}</strong></div>
+      </div>
+      <div class="dashboard-actions">
+        <aside class="daily-total" title="Today's actual End − Start durations, including pauses; running work uses the current time.">
+          <span>Today's Total</span>
+          <strong>{{ totalsUnavailable ? 'Unavailable' : todayTotal }}</strong>
+        </aside>
+        <div class="timer-controls">
+          <button class="timer-action start-action" @click="startClock" :disabled="submitted || starting || activeClock === 'active'">{{ starting ? 'Starting…' : 'Start' }}</button>
+          <button class="timer-action pause-action" @click="pauseClock" :disabled="submitted || starting || activeClock !== 'active'">Pause</button>
+          <button class="timer-action end-action" @click="requestSubmitWorkHours" :disabled="submitted || starting" title="Submit Work Hours">End</button>
+        </div>
+        <button class="dashboard-reset" @click="resetClocks" :disabled="submitted || starting" title="Reset Work Hour Clock" aria-label="Reset Work Hour Clock">⟳</button>
+      </div>
+      <div class="dashboard-aggregates">
+        <span>System Work Hours <strong>{{ workHourOverall }}</strong></span>
+        <span>NCM Hours <strong>{{ ncmHours }}</strong></span>
+      </div>
     </div>
     <!-- NCM panel: header always visible; inputs and Send button collapse/expand -->
     <div class="ncm-panel">
@@ -670,10 +727,52 @@ onBeforeUnmount(() => {
 
     <!-- Transient fade-out message -->
     <div v-if="messageVisible" class="fade-message" role="status" aria-live="polite">{{ messageText }}</div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
+.timer-dashboard {
+  width: 100%;
+  padding: clamp(14px, 2vw, 28px);
+  border: 1px solid #f2c7a6;
+  border-radius: 20px;
+  color: #82451f;
+  background: linear-gradient(135deg, #ffffff, #fff7ef 65%, #fff0e4);
+  box-shadow: inset 0 1px 0 #fff, 0 8px 24px #ec660210;
+}
+.dashboard-topbar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding-bottom: 16px; font-size: 0.9rem; color: #79553c; text-align: left; }
+.dashboard-identity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; min-width: 0; }
+.dashboard-identity strong { color: #82451f; overflow-wrap: anywhere; }
+.dashboard-identity span strong { margin-left: 6px; }
+.dashboard-topbar time { margin-left: auto; font-variant-numeric: tabular-nums; }
+.dashboard-body { width: min(100%, 960px); margin: 8px auto 0; }
+.timer-display { position: relative; isolation: isolate; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: clamp(220px, 28vh, 320px); overflow: hidden; border: 1px solid #f2c7a6; border-radius: 14px; background: linear-gradient(135deg, #fff, #fff3e8); box-shadow: inset 0 0 24px #fff, 0 6px 18px #ec66020c; }
+.timer-orbit { position: absolute; z-index: -1; width: 70%; max-width: 500px; height: 85%; border-radius: 50%; border: 1px solid #f3b788; box-shadow: 0 0 22px #ec660214, inset 0 0 18px #ec660208; }
+.running .timer-orbit { border-color: #ec6602; box-shadow: 0 0 28px #ec660225; }
+.timer-digits { color: #ec6602; font-size: clamp(2.6rem, 6vw, 5.5rem); line-height: 1.15; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-shadow: 0 2px 4px #ec660212; }
+.timer-caption { margin-top: 8px; font-size: 1rem; }
+.timer-state { margin-top: 8px; font-size: 0.8rem; color: #79553c; }
+.task-summary { margin-top: 20px; padding: 18px; border: 1px solid #f2c7a6; border-radius: 12px; background: #fff; text-align: center; }
+.task-summary > div:first-child { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; }
+.dashboard-actions { display: grid; grid-template-columns: minmax(110px, 1fr) auto minmax(44px, 1fr); align-items: center; gap: 20px; margin-top: 26px; }
+.daily-total { justify-self: start; display: flex; flex-direction: column; gap: 3px; padding: 10px 14px; background: #fff; border: 1px solid #f2c7a6; border-radius: 10px; }
+.daily-total span { color: #79553c; font-size: 0.75rem; }
+.daily-total strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.timer-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(12px, 2vw, 28px); }
+.timer-action { min-width: 120px; border-radius: 999px; padding: 10px 28px; color: #fff; border: 1px solid #ffffff70; box-shadow: inset 0 0 10px #ffffff35, 0 0 12px #0004; }
+.start-action { background: linear-gradient(#20b7ab, #087d78); box-shadow: inset 0 0 10px #b4fff955, 0 0 14px #15d7b955; }
+.pause-action { background: linear-gradient(#68778b, #364254); }
+.end-action { background: linear-gradient(#b83b4c, #711727); box-shadow: inset 0 0 10px #ffb6bf44, 0 0 14px #f6335555; }
+.timer-action:disabled, .dashboard-reset:disabled { opacity: 0.4; cursor: not-allowed; }
+.timer-action:not(:disabled):hover { filter: brightness(1.2); }
+.dashboard-reset { justify-self: end; background: transparent; color: #82451f; padding: 8px 12px; font-size: 1.5rem; }
+.dashboard-aggregates { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 28px; margin: 18px 0; color: #79553c; font-size: 0.85rem; }
+.timer-dashboard .ncm-panel { background: #fff; color: #82451f; }
+@media (max-width: 720px) {
+  .dashboard-actions { grid-template-columns: 1fr auto; gap: 16px; }
+  .timer-controls { grid-column: 1 / -1; grid-row: 1; }
+  .timer-action { min-width: 90px; padding: 10px 18px; }
+}
 .workhour-panel {
   background: #f8f8f8;
   border-radius: 12px;

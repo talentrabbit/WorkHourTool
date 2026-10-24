@@ -171,7 +171,7 @@ async function doDelete() {
 </script>
 
 <style scoped>
-.customer-page { max-width: 96%; margin: 1rem 1rem; padding: 1rem; background: #fff; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); font-size: 0.95rem; text-align: left; }
+.customer-page { width: 100%; max-width: 100%; min-width: 0; margin: 0; padding: 1rem; background: #fff; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); font-size: 0.95rem; text-align: left; }
 .page-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 12px; position: relative; }
 .btn { background: #EC6602; color: #fff; border: none; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.92rem; }
 .btn:hover { opacity: 0.95 }

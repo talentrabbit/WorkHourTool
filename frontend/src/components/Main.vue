@@ -87,19 +87,18 @@ const isProcess = computed(() => roleList.value.includes('process') || roleList.
     align-items: center;
     margin-top: 2vw;
     margin-bottom: 2vw;
-    width: 60vw;
-    max-width: 1200px;
+    width: 100%;
   }
   .hero-img {
-    width: 50vw;
+    width: 100%;
     max-width: 960px;
-    min-width: 480px;
+    min-width: 0;
     margin-bottom: 1.2rem;
     border-radius: 18px;
     box-shadow: 0 4px 32px rgba(236, 102, 2, 0.15);
   }
 .hero-title {
-  font-size: 2.5rem;
+  font-size: clamp(2rem, 3vw, 2.75rem);
   font-weight: 800;
   color: #EC6602;
   margin-bottom: 0.5rem;
@@ -119,13 +118,11 @@ const isProcess = computed(() => roleList.value.includes('process') || roleList.
     margin-top: 3vw;
     justify-content: center;
     width: 100%;
-    max-width: 1200px;
     padding: 0 1rem;
   }
   .entry-link {
     flex: 1 1 260px; /* grow/shrink, prefer ~260px width */
     min-width: 220px;
-    max-width: 340px;
     height: 70px;
     padding: 0 1.5rem;
     background: linear-gradient(90deg, #EC6602 0%, #FFA351 100%);
