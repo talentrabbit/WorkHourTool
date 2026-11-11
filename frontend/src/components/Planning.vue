@@ -1013,8 +1013,9 @@ async function assignNonProductTask() {
 
 <style scoped>
 .planning-container {
-  max-width: 96%; width: 75vw; 
-  margin: 4vw auto;
+  max-width: 100%; width: 100%;
+  min-width: 0;
+  margin: 0;
   padding: 0.5vw;
   background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%);
   border-radius: 18px;

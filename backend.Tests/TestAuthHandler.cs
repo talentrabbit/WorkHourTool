@@ -8,14 +8,21 @@ namespace backend.Tests
 {
     public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
-        public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, System.Text.Encodings.Web.UrlEncoder encoder, ISystemClock clock)
-            : base(options, logger, encoder, clock)
+        public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, System.Text.Encodings.Web.UrlEncoder encoder)
+            : base(options, logger, encoder)
         {
         }
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
-            var claims = new[] { new Claim(ClaimTypes.Name, "TestUser") };
+            // These headers belong exclusively to the test authentication scheme, never production.
+            if (Request.Headers["X-Test-Anonymous"] == "1")
+                return Task.FromResult(AuthenticateResult.NoResult());
+
+            var name = Request.Headers["X-Test-Identity"].FirstOrDefault() ?? "TestUser";
+            var claims = new List<Claim> { new Claim(ClaimTypes.Name, name) };
+            foreach (var role in Request.Headers["X-Test-Roles"].ToString().Split(',', StringSplitOptions.RemoveEmptyEntries))
+                claims.Add(new Claim(ClaimTypes.Role, role));
             var identity = new ClaimsIdentity(claims, "Test");
             var principal = new ClaimsPrincipal(identity);
             var ticket = new AuthenticationTicket(principal, "Test");

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, provide, watch, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, provide, watch, computed, onMounted, inject } from 'vue'
 import axios from 'axios'
 import WorkSeat from './WorkSeat.vue'
 import TimerClock from './TimerClock.vue'
@@ -20,21 +20,6 @@ provide('isWorkSubmitted', isWorkSubmitted)
 const selectedSerial = ref('')
 const selectedProcess = ref('')
 const selectedWorkHourId = ref(null)
-
-const heroImages = [hero1, hero2, hero3]
-const currentHero = ref(0)
-function nextHero() {
-  currentHero.value = (currentHero.value + 1) % heroImages.length
-}
-
-// Switch hero image every 5 seconds
-let heroInterval = null
-onMounted(() => {
-  heroInterval = setInterval(nextHero, 5000)
-})
-onUnmounted(() => {
-  if (heroInterval) clearInterval(heroInterval)
-})
 
 // Worker-mode detection and data
 const username = inject('username', ref('Guest'))
@@ -85,11 +70,7 @@ async function checkTodayAssignments(){
     })
     todayAssignments.value = todays
     if (!todays.length) {
-      if (window.confirm('No work arranged! Add new?')) {
-        planningMode.value = 'edit'
-      } else {
-        planningMode.value = 'wait'
-      }
+      planningMode.value = 'wait'
     } else {
       planningMode.value = 'view'
     }
@@ -235,13 +216,6 @@ function handleStartWork(payload) {
       <!-- Removed duplicate logo -->
       <div class="nav-header-spacer"></div>
     </div>
-    <div class="hero-section">
-      <div class="hero-carousel">
-        <img :src="heroImages[currentHero]" alt="Hero" class="hero-img" />
-      </div>
-      <h1>Manufacturing Work Hour Tool</h1>
-      <p>Track, analyze, and improve your department's productivity.</p>
-    </div>
     <div class="nav-tabs-horizontal">
       <button
         :class="{ active: activeTab === 'task', disabled: (isCountingTimerActive && activeTab === 'counting') || isWorkSubmitted }"
@@ -309,22 +283,11 @@ function handleStartWork(payload) {
 </template>
 
 <style scoped>
-.hero-carousel {
-    position: relative;
-    overflow: hidden;
-  }
-  .hero-carousel img {
-    width: 100%;
-    height: auto;
-    transition: opacity 0.5s ease-in-out;
-  }
-.nav-layout { max-width: 96%; width: 75vw; display: flex; flex-direction: column; min-height: 100vh; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
+.nav-layout { max-width: 100%; width: 100%; min-width: 0; display: flex; flex-direction: column; background: linear-gradient(180deg, #FFF7EF 0%, #FFFFFF 100%); }
 .nav-header { display: flex; align-items: center; padding: 1em 2em 0.5em 1em; }
 .company-logo { display:none; }
 .hero-section h1 { margin: 0; font-size: 2.5em; color: #EC6602; }
 .hero-section p { margin: 0.5em 0 0 0; color: #82451F; font-size: 1.1em; }
-.hero-carousel { width: 100%; height: 340px; margin-bottom: 0.7em; overflow: hidden; border-radius: 16px; box-shadow: 0 4px 16px rgba(236,102,2,0.15); background: #fff4ea; display: flex; align-items: center; justify-content: center; }
-.hero-img { width: 75%; height: 15%; object-fit: cover; transition: opacity 0.5s; }
 .nav-tabs-horizontal { display: flex; gap: 1em; background: #FFF0E4; padding: 0.5em 1em; border-bottom: 1px solid #F2C7A6; box-shadow: inset 0 -1px 0 #F2C7A6; }
 .nav-tabs-horizontal button { padding: 0.75em 1.5em; border: none; background: #FFE6D3; cursor: pointer; border-radius: 8px 8px 0 0; font-size: 1em; color: #82451F; box-shadow: 0 2px 6px rgba(236,102,2,0.12); transition: transform 0.1s; }
 .nav-tabs-horizontal button:hover { transform: translateY(-1px); }

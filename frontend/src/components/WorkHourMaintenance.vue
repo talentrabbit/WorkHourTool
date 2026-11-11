@@ -344,7 +344,7 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-.maintenance-container{ width: min(1850px, 92%); max-width: 92%; margin: 0 0 0 2rem; padding: 12px }
+.maintenance-container{ width: 100%; max-width: 100%; min-width: 0; margin: 0; padding: 12px }
 .collapsible{ margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px }
 .collapsible-header{ display:flex; justify-content:space-between; padding:8px; background:#f7f7f7; cursor:pointer }
 .collapsible-header h3 { font-family: 'Times New Roman', Times, serif; font-size: 1.05rem; font-weight: 600; margin: 0; }

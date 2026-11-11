@@ -36,9 +36,8 @@ namespace backend.Tests
 
             var startResp = await client.PostAsJsonAsync(_baseUrl + "/start-session", startReq);
             startResp.EnsureSuccessStatusCode();
-            var startObj = await startResp.Content.ReadFromJsonAsync<dynamic>();
-            Assert.NotNull(startObj);
-            string sessionId = (string)startObj.sessionId;
+            var startObj = await startResp.Content.ReadFromJsonAsync<JsonElement>();
+            string sessionId = startObj.GetProperty("sessionId").GetString()!;
             Assert.False(string.IsNullOrWhiteSpace(sessionId));
 
             // Send heartbeat
@@ -54,12 +53,13 @@ namespace backend.Tests
             var hbResp = await client.PostAsJsonAsync(_baseUrl + "/session-heartbeat", hbReq);
             hbResp.EnsureSuccessStatusCode();
 
-            // Get session
-            var getResp = await client.GetAsync(_baseUrl + "/session/" + Uri.EscapeDataString(sessionId));
-            getResp.EnsureSuccessStatusCode();
-            var sessionObj = await getResp.Content.ReadFromJsonAsync<dynamic>();
-            Assert.NotNull(sessionObj);
-            Assert.Equal(sessionId, (string)sessionObj.sessionId);
+            // There is no GET /session/{sessionId} route. Verify the live session through
+            // the registered manager and persisted completion through the isolated SQLite DB.
+            var manager = _factory.Services.GetRequiredService<WorkSessionManager>();
+            var liveSession = manager.GetBySessionId(sessionId);
+            Assert.NotNull(liveSession);
+            Assert.Equal(sessionId, liveSession.SessionId);
+            Assert.True(liveSession.ElapsedSeconds >= 5);
 
             // Complete session
             var completeReq = new
@@ -70,13 +70,11 @@ namespace backend.Tests
             var completeResp = await client.PostAsJsonAsync(_baseUrl + "/complete-session", completeReq);
             completeResp.EnsureSuccessStatusCode();
 
-            // Verify state changed when reading session (it should still be readable)
-            var getAfter = await client.GetAsync(_baseUrl + "/session/" + Uri.EscapeDataString(sessionId));
-            getAfter.EnsureSuccessStatusCode();
-            var afterObj = await getAfter.Content.ReadFromJsonAsync<dynamic>();
-            Assert.NotNull(afterObj);
-            // state may be "Completed" or updated by cleanup; just ensure session exists
-            Assert.Equal(sessionId, (string)afterObj.sessionId);
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var completed = await db.WorkSessions.SingleAsync(s => s.SessionId == sessionId);
+            Assert.Equal("Completed", completed.State);
+            Assert.True(completed.ElapsedSeconds >= 6);
         }
     }
 }

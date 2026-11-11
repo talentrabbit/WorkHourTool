@@ -104,6 +104,7 @@ builder.Services.AddControllers().AddJsonOptions(opts =>
 {
     opts.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
 });
+builder.Services.AddProblemDetails();
 
 // Windows Authentication (Negotiate)
 // Allow tests to disable Negotiate by setting TEST_DISABLE_NEGOTIATE=1 in the process environment.
@@ -122,7 +123,14 @@ else
     builder.Services.AddAuthentication();
 }
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(backend.Security.DatabaseAdministratorRequirement.PolicyName, policy =>
+        policy.RequireAuthenticatedUser().AddRequirements(new backend.Security.DatabaseAdministratorRequirement()));
+});
+builder.Services.AddScoped<backend.Services.ICurrentUserResolver, backend.Services.CurrentUserResolver>();
+builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, backend.Security.DatabaseAdministratorHandler>();
+builder.Services.AddScoped<backend.Services.IUserAdministrationService, backend.Services.UserAdministrationService>();
 
 // Add CORS policy for frontend
 builder.Services.AddCors(options =>
@@ -173,6 +181,8 @@ catch { /* fallback to AppDbContext.OnConfiguring if DI setup fails */ }
 // DbContext registered above via AddDbContextPool with options; no additional registration needed here.
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
 
 // Use CORS in development (also applied globally below)
 if (app.Environment.IsDevelopment())
@@ -269,35 +279,12 @@ static async Task<(string user, string displayName, List<string> roles)> BuildUs
 
 static string? CanonicalRole(string? role)
 {
-    var key = (role ?? string.Empty)
-        .Trim()
-        .ToLowerInvariant()
-        .Replace(" ", string.Empty)
-        .Replace("_", string.Empty)
-        .Replace("-", string.Empty);
-
-    return key switch
-    {
-        "administrator" or "administrators" => "Administrator",
-        "productionmanager" or "productionmanagers" => "ProductionManager",
-        "processengineer" or "processengineers" => "ProcessEngineer",
-        "worker" or "workers" => "Worker",
-        _ => null
-    };
+    return backend.Security.UserRoles.CanonicalRole(role);
 }
 
 static IEnumerable<string> ParseCanonicalRoles(string? roleText)
 {
-    if (string.IsNullOrWhiteSpace(roleText)) yield break;
-
-    foreach (var part in roleText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        var role = CanonicalRole(part);
-        if (!string.IsNullOrWhiteSpace(role))
-        {
-            yield return role;
-        }
-    }
+    return backend.Security.UserRoles.ParseCanonicalRoles(roleText);
 }
 
 static async Task<RoleConfig> BuildRolesConfigFromDbAsync(IServiceScopeFactory scopeFactory, CancellationToken cancellationToken = default)
@@ -326,7 +313,7 @@ static async Task<RoleConfig> BuildRolesConfigFromDbAsync(IServiceScopeFactory s
 
         foreach (var role in ParseCanonicalRoles(u.Role))
         {
-            switch (role)
+            switch (CanonicalRole(role))
             {
                 case "Administrator":
                     admins.Add(name);
@@ -524,11 +511,7 @@ app.MapGet("/api/auth/challenge", async (HttpContext http, ILogger<Program> logg
 // Local helpers
 static string ExtractSamAccountName(string domainQualified)
 {
-    if (string.IsNullOrWhiteSpace(domainQualified)) return domainQualified;
-    var idx = domainQualified.IndexOf('\\');
-    return idx >= 0 && idx + 1 < domainQualified.Length
-        ? domainQualified[(idx + 1)..]
-        : domainQualified;
+    return backend.Security.PrincipalAccount.ExtractSamAccountName(domainQualified);
 }
 
 // Endpoint to get roles grouped by role name from Users table.

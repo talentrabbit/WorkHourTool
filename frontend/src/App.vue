@@ -28,6 +28,7 @@
         <!-- Kanban entry hidden while feature is under construction -->
         <router-link v-if="false" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
         <router-link v-if="isAdmin || isManager" to="/orders" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Order Info</router-link>
+        <router-link v-if="isAdmin" to="/admin" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Admin</router-link>
       </nav>
       <main class="portal-content">
         <router-view />
@@ -253,7 +254,7 @@ function loadFrontendVersion() {
 <style scoped>
 /* Root: fill width, allow page-level scrolling (no inner scrollbars) */
 .portal {
-  width: 100vw;
+  width: 100%;
   max-width: 100%;
   min-height: 100vh;
   height: auto;
@@ -281,8 +282,7 @@ function loadFrontendVersion() {
 .home-btn-img { max-height: calc(var(--header-h) - 18px); max-width: calc(var(--header-h) - 18px); object-fit: contain; display: block; }
 .header-title {
   margin-left: 8px;
-  /* keep requested compact header title style */
-  font-size: 14px;
+  font-size: clamp(18px, 1.5vw, 24px);
   font-weight: 600;
   letter-spacing: .5px;
   font-family: Calibri, 'Segoe UI', Arial, sans-serif;
@@ -343,6 +343,7 @@ function loadFrontendVersion() {
 /* Main Content */
 .portal-content {
   flex: 1;
+  width: 100%;
   min-width: 0;
   padding: 16px 18px 32px;
   overflow: visible;
@@ -379,6 +380,12 @@ function loadFrontendVersion() {
 .btn:hover { opacity: 0.95 }
 
 /* Responsive tweaks */
+@media (max-width: 1280px) {
+  .portal-header { height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .header-left, .header-right { min-width: 0; flex-wrap: wrap; }
+  .header-right { gap: 8px; margin-left: auto; }
+}
+
 @media (max-width: 1600px) {
   .portal-nav { gap: 6px; padding: 12px 16px; }
 }
@@ -392,7 +399,6 @@ function loadFrontendVersion() {
 @media (max-width: 1024px) {
   .portal-nav { overflow-x: scroll; }
   .portal-content { padding: 12px; }
-  .header-title { font-size: 1rem; }
   .logon-modal { width: 320px }
 }
 </style>
