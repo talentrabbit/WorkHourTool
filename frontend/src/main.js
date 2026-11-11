@@ -10,6 +10,7 @@ import Ncm from './components/Ncm.vue'
 import ProductRegister from './components/ProductRegister.vue'
 import Kanban from './components/Kanban.vue'
 import OrderInfo from './components/OrderInfo.vue'
+import AdminUsers from './components/AdminUsers.vue'
 import VXETable from 'vxe-table'
 import 'vxe-table/lib/style.css'
 import axios from 'axios'
@@ -34,6 +35,7 @@ const routes = [
   { path: '/ncm', component: Ncm }, 
   { path: '/kanban', component: Kanban }
   ,{ path: '/orders', component: OrderInfo }
+  ,{ path: '/admin', component: AdminUsers }
 ]
 
 const router = createRouter({

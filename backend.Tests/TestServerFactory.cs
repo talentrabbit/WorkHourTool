@@ -33,8 +33,13 @@ namespace backend.Tests
             builder.ConfigureServices(services =>
             {
                 // Replace AppDbContext with one that uses the in-memory SQLite
-                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-                if (descriptor != null) services.Remove(descriptor);
+                // Remove the pooled context, pool leases and options configuration as well as options.
+                // Otherwise the production SQLite connection/configuration can survive the replacement.
+                var databaseDescriptors = services.Where(d => d.ServiceType == typeof(AppDbContext)
+                    || d.ServiceType == typeof(DbContextOptions)
+                    || (d.ServiceType.IsGenericType
+                        && d.ServiceType.GetGenericArguments().Contains(typeof(AppDbContext)))).ToList();
+                foreach (var descriptor in databaseDescriptors) services.Remove(descriptor);
 
                 services.AddDbContext<AppDbContext>(options =>
                 {

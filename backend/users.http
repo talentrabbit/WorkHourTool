@@ -1,0 +1,36 @@
+@baseUrl = http://shai571a:5063
+@userId = 1
+
+# Use Windows/Negotiate credentials for a database Administrator; never X-Dev-User.
+### List users
+GET {{baseUrl}}/api/users
+
+### Get a user (also the Location returned by POST)
+GET {{baseUrl}}/api/users/{{userId}}
+
+### Create a user with multiple roles
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "gid": "example.worker",
+  "fullName": "Example Worker",
+  "mail": "example.worker@example.com",
+  "roles": ["Worker", "ProcessEngineer"]
+}
+
+### Delete a user (409 for self or last administrator)
+DELETE {{baseUrl}}/api/users/{{userId}}
+
+### Missing user returns 404
+GET {{baseUrl}}/api/users/2147483647
+
+### Invalid role returns 400
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "gid": "invalid.role",
+  "fullName": "Invalid Role",
+  "roles": ["Unknown"]
+}

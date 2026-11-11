@@ -28,6 +28,7 @@
         <!-- Kanban entry hidden while feature is under construction -->
         <router-link v-if="false" to="/kanban" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Kanban</router-link>
         <router-link v-if="isAdmin || isManager" to="/orders" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Order Info</router-link>
+        <router-link v-if="isAdmin" to="/admin" :class="['nav-link',{dimmed: isCountingTimerActive}]" active-class="active">Admin</router-link>
       </nav>
       <main class="portal-content">
         <router-view />
