@@ -3,6 +3,10 @@ import { ref, provide, watch, computed, onMounted, inject } from 'vue'
 import axios from 'axios'
 import WorkSeat from './WorkSeat.vue'
 import TimerClock from './TimerClock.vue'
+// Hero carousel images from src/assets so they are bundled
+import hero1 from '../assets/HeroSection/factory1.jpg?url'
+import hero2 from '../assets/HeroSection/factory2.jpg?url'
+import hero3 from '../assets/HeroSection/factory3.jpg?url'
 
 const activeTab = ref('task')
 // Shared state for timer running
