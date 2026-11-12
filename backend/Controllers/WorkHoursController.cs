@@ -752,6 +752,8 @@ namespace backend.Controllers
             var db = GetDb();
             var target = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId.Value);
             if (target == null) return NotFound(new { message = "WorkHour not found" });
+            if (string.Equals(target.State, "Completed", StringComparison.OrdinalIgnoreCase))
+                return Conflict(new { message = "Completed WorkHour cannot be started" });
 
             target.State = "Working";
             target.WorkerName = req.WorkerName;
@@ -866,6 +868,8 @@ namespace backend.Controllers
             var db = GetDb();
             var wh = db.WorkHours.FirstOrDefault(w => w.Id == req.WorkHourId);
             if (wh == null) return NotFound(new { message = "WorkHour not found" });
+            if (string.Equals(wh.State, "Completed", StringComparison.OrdinalIgnoreCase))
+                return Conflict(new { message = "WorkHour is already completed" });
 
             // Update EffectiveHours with reported value (from timer)
             if (req.EffectiveHours.HasValue)
@@ -1105,6 +1109,16 @@ namespace backend.Controllers
         {
             if (req == null || string.IsNullOrWhiteSpace(req.SessionId)) return BadRequest(new { message = "SessionId is required" });
 
+            // Cleanup's persisted terminal snapshot takes precedence over a stale browser or manager.
+            var db = GetDb();
+            var persisted = db.WorkSessions.AsNoTracking().FirstOrDefault(s => s.SessionId == req.SessionId);
+            if (persisted != null && (string.Equals(persisted.State, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(persisted.State, "Expired", StringComparison.OrdinalIgnoreCase)))
+            {
+                _sessionManager?.StopManagingSession(req.SessionId);
+                return Ok(new { state = persisted.State, elapsedSeconds = persisted.ElapsedSeconds, activeClock = persisted.ActiveClock, sessionId = persisted.SessionId });
+            }
+
             try
             {
                 if (_sessionManager != null)
@@ -1121,7 +1135,7 @@ namespace backend.Controllers
                     if (info != null)
                     {
                         _logger.LogInformation("Heartbeat processed in WorkSessionManager for SessionId: {SessionId}, ElapsedSeconds: {ElapsedSeconds}, State: {State}", req.SessionId, info.ElapsedSeconds, info.State);
-                        return Ok(new { message = "heartbeat recorded", elapsedSeconds = info.ElapsedSeconds, state = info.State });
+                        return Ok(new { message = "heartbeat recorded", elapsedSeconds = info.ElapsedSeconds, state = info.State, activeClock = info.ActiveClock, sessionId = info.SessionId });
                     }    
                 }
             }
@@ -1130,9 +1144,11 @@ namespace backend.Controllers
                 _logger?.LogWarning(ex, "WorkSessionManager failed to process heartbeat, falling back to DB persistence");
             }
 
-            var db = GetDb();
             var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
             if (session == null) return NotFound(new { message = "Session not found" });
+            if (string.Equals(session.State, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(session.State, "Expired", StringComparison.OrdinalIgnoreCase))
+                return Ok(new { state = session.State, elapsedSeconds = session.ElapsedSeconds, activeClock = session.ActiveClock, sessionId = session.SessionId });
             session.LastHeartbeat = DateTime.Now;
             session.ElapsedSeconds = req.ElapsedSeconds ?? session.ElapsedSeconds;
             session.ActiveClock = req.ActiveClock ?? session.ActiveClock;
@@ -1174,6 +1190,14 @@ namespace backend.Controllers
         public IActionResult CompleteSession([FromBody] CompleteSessionRequest req)
         {
             if (req == null || string.IsNullOrWhiteSpace(req.SessionId)) return BadRequest(new { message = "SessionId is required" });
+
+            var persisted = GetDb().WorkSessions.AsNoTracking().FirstOrDefault(s => s.SessionId == req.SessionId);
+            if (persisted != null && (string.Equals(persisted.State, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(persisted.State, "Expired", StringComparison.OrdinalIgnoreCase)))
+            {
+                _sessionManager?.StopManagingSession(req.SessionId);
+                return Ok(new { message = "session already finalized", state = persisted.State, elapsedSeconds = persisted.ElapsedSeconds });
+            }
 
             try
             {
@@ -1267,16 +1291,17 @@ namespace backend.Controllers
             if (workHourId <= 0) return BadRequest(new { message = "WorkHourId is required" });
             try
             {
-                if (_sessionManager == null)
-                {
-                    _logger?.LogError("WorkSessionManager not available, cannot fetch live session for WorkHourId {WorkHourId}", workHourId);
-                    return NotFound();
-                }
-                var session = _sessionManager.GetByWorkHourId(workHourId);
+                var db = GetDb();
+                var session = _sessionManager?.GetByWorkHourId(workHourId)
+                    ?? db.WorkSessions.AsNoTracking()
+                        .Where(s => s.WorkHourId == workHourId)
+                        .OrderByDescending(s => s.LastHeartbeat)
+                        .ThenByDescending(s => s.Id)
+                        .FirstOrDefault();
                 _logger?.LogInformation("Fetched session for WorkHourId {WorkHourId}: {Session}", workHourId, session == null ? "null" : session.SessionId);
                 if (session == null)
                 {
-                    _logger?.LogInformation("No active session found for WorkHourId {WorkHourId}", workHourId);
+                    _logger?.LogInformation("No session found for WorkHourId {WorkHourId}", workHourId);
                     return NotFound();
                 }
 
@@ -1310,7 +1335,11 @@ namespace backend.Controllers
                         ActiveClock = session.ActiveClock,
                         State = session.State,
                         MetadataJson = session.MetadataJson,
-                        LastHeartbeat = session.LastHeartbeat
+                        LastHeartbeat = session.LastHeartbeat,
+                        EndTimeActual = db.WorkHours.AsNoTracking()
+                            .Where(w => w.Id == workHourId)
+                            .Select(w => w.EndTimeActual)
+                            .FirstOrDefault()
                     });
             }
             catch (Exception ex)

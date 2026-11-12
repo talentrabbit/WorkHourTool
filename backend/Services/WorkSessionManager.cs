@@ -74,6 +74,12 @@ namespace backend.Services
                     session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
                 }
 
+                if (session != null && IsTerminalState(session.State))
+                {
+                    StopManagingSession(session.SessionId);
+                    return GetInfo(session);
+                }
+
                 if (session == null)
                 {
                     // Create new session
@@ -115,24 +121,37 @@ namespace backend.Services
         public ManagedSessionInfo? Heartbeat(ManagerHeartbeatRequest req)
         {
             if (req == null || string.IsNullOrWhiteSpace(req.SessionId)) return null;
-            if (_sessions.TryGetValue(req.SessionId, out var managed))
-            {
-                managed.OnHeartbeat(req);
-                return new ManagedSessionInfo { SessionId = managed.Session.SessionId, ElapsedSeconds = managed.Session.ElapsedSeconds, State = managed.Session.State };
-            }
 
-            // If not in memory, try to load from DB and create managed session
+            // Always check persistence, including when memory still contains a pre-cleanup session.
             using (var scope = _scopeFactory.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var session = db.WorkSessions.FirstOrDefault(s => s.SessionId == req.SessionId);
+                var session = db.WorkSessions.AsNoTracking().FirstOrDefault(s => s.SessionId == req.SessionId);
                 if (session == null) return null;
-                managed = _sessions.GetOrAdd(session.SessionId, sid => new ManagedSession(session, this, _logger));
+                if (IsTerminalState(session.State))
+                {
+                    StopManagingSession(session.SessionId);
+                    return GetInfo(session);
+                }
+
+                var managed = _sessions.GetOrAdd(session.SessionId, sid => new ManagedSession(session, this, _logger));
                 managed.OnHeartbeat(req);
                 managed.EnsureTimerStarted();
-                return new ManagedSessionInfo { SessionId = managed.Session.SessionId, ElapsedSeconds = managed.Session.ElapsedSeconds, State = managed.Session.State };
+                return GetInfo(managed.Session);
             }
         }
+
+        private static bool IsTerminalState(string? state) =>
+            string.Equals(state, "Completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "Expired", StringComparison.OrdinalIgnoreCase);
+
+        private static ManagedSessionInfo GetInfo(WorkSession session) => new ManagedSessionInfo
+        {
+            SessionId = session.SessionId,
+            ElapsedSeconds = session.ElapsedSeconds,
+            State = session.State,
+            ActiveClock = session.ActiveClock
+        };
 
         public WorkSession? GetBySessionId(string sessionId)
         {
@@ -147,18 +166,17 @@ namespace backend.Services
 
         public WorkSession? GetByWorkHourId(int workHourId)
         {
-            // check managed sessions first
-            var managed = _sessions.Values.FirstOrDefault(m => m.Session.WorkHourId == workHourId && m.Session.State != "Completed" && m.Session.State != "Expired");
-            if (managed != null) return managed.Session;
-
-            // fallback to DB
+            // Only serve live memory for a session that is still active in persistence.
             using (var scope = _scopeFactory.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                return db.WorkSessions.AsNoTracking()
+                var session = db.WorkSessions.AsNoTracking()
                     .Where(s => s.WorkHourId == workHourId)
                     .OrderByDescending(s => s.LastHeartbeat)
                     .FirstOrDefault(s => s.State != "Completed" && s.State != "Expired");
+                if (session == null) return null;
+                return _sessions.TryGetValue(session.SessionId, out var managed)
+                    && !IsTerminalState(managed.Session.State) ? managed.Session : session;
             }
         }
 
@@ -313,6 +331,7 @@ namespace backend.Services
             public string SessionId { get; set; } = string.Empty;
             public int ElapsedSeconds { get; set; }
             public string? State { get; set; }
+            public string? ActiveClock { get; set; }
         }
 
         // Internal managed session with its own timer
@@ -352,6 +371,7 @@ namespace backend.Services
             {
                 lock (_lock)
                 {
+                    if (IsTerminalState(Session.State)) return;
                     Session.LastHeartbeat = DateTime.Now;
                     if (req.ElapsedSeconds.HasValue && req.ElapsedSeconds.Value > Session.ElapsedSeconds)
                         Session.ElapsedSeconds = req.ElapsedSeconds.Value;
@@ -378,7 +398,7 @@ namespace backend.Services
             {
                 lock (_lock)
                 {
-                    if (_timer != null) return;
+                    if (_timer != null || IsTerminalState(Session.State)) return;
                     // tick every 1s
                     _timer = new Timer(Tick, null, 1000, 1000);
                 }

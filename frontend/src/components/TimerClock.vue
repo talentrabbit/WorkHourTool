@@ -27,10 +27,16 @@ const totalsUnavailable = ref(false)
 const localStart = ref(null)
 const localEnd = ref(null)
 let wallClockTimer = null
+let sessionStatusTimer = null
+let statusRequest = null
+let disposed = false
+const finalizedAt = ref(null)
+const frozenTodayTotal = ref(null)
 const currentDateTime = computed(() => formatLocalIso(now.value)?.replace('T', ' '))
 const currentRecord = computed(() => dailyWorkHours.value.find(w => String(w.id) === String(currentWorkHourId.value)))
 const workLocation = computed(() => currentRecord.value?.location || 'Not specified')
 const todayTotal = computed(() => {
+  if (frozenTodayTotal.value !== null) return frozenTodayTotal.value
   const startOfDay = new Date(now.value); startOfDay.setHours(0, 0, 0, 0)
   const endOfDay = new Date(startOfDay); endOfDay.setDate(endOfDay.getDate() + 1)
   let total = 0
@@ -247,13 +253,80 @@ if (props.initialWorkHourId) {
   currentWorkHourId.value = props.initialWorkHourId
 }
 
+function isTerminalState(state) {
+  return ['completed', 'expired'].includes(String(state || '').toLowerCase())
+}
+
+async function finalizeFromServer(snapshot) {
+  const alreadyFinalized = finalizedAt.value !== null
+  const end = snapshot.endTimeActual ?? snapshot.EndTimeActual
+  finalizedAt.value = end ? new Date(end) : new Date()
+  localEnd.value = finalizedAt.value
+  const elapsed = Number(snapshot.elapsedSeconds ?? snapshot.ElapsedSeconds)
+  if (Number.isFinite(elapsed)) workTime.value = elapsed
+  if (timer) clearInterval(timer)
+  timer = null
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
+  heartbeatTimer = null
+  activeClock.value = 'paused'
+  submitted.value = true
+  showSubmitConfirm.value = false
+  showNcmInputs.value = false
+  disconnected.value = false
+  if (isCountingTimerActive) isCountingTimerActive.value = false
+  if (isWorkSubmitted) isWorkSubmitted.value = true
+  if (!alreadyFinalized) {
+    emit('work-submitted')
+    showTransientMessage('Work session finalized by the server. Counting has stopped.', 6000)
+  }
+  // Refresh actual end times for every work item before taking the final total snapshot.
+  await fetchDailyWorkHours()
+  if (!disposed) {
+    frozenTodayTotal.value = todayTotal.value
+    void fetchAggregates()
+  }
+}
+
+async function syncSessionStatus() {
+  if (disposed) return false
+  if (finalizedAt.value) return false
+  if (!currentWorkHourId.value) return true
+  if (statusRequest) return statusRequest
+  const id = currentWorkHourId.value
+  statusRequest = (async () => {
+    try {
+      const { data } = await axios.get(`/api/WorkHours/session-by-workhour/${id}`, { timeout: 5000 })
+      if (disposed || String(id) !== String(currentWorkHourId.value)) return false
+      if (isTerminalState(data?.state ?? data?.State)) {
+        await finalizeFromServer(data)
+        return false
+      }
+      return true
+    } catch (err) {
+      if (disposed || finalizedAt.value) return false
+      if (err.response?.status === 404) return true // Not started yet; never treat a missing session as finalized.
+      disconnected.value = true
+      return false
+    } finally {
+      statusRequest = null
+    }
+  })()
+  return statusRequest
+}
+
 // helper: try to restore existing session for current WorkHourId
 async function tryRestoreSessionForWorkHour() {
   if (!currentWorkHourId.value) return
+  if (!await syncSessionStatus()) return
   try {
     console.log('TimerClock: attempting to restore session for WorkHourId', currentWorkHourId.value)
     const res = await axios.get(`/api/WorkHours/session-by-workhour/${currentWorkHourId.value}`)
     const session = res.data
+    if (disposed || finalizedAt.value) return
+    if (isTerminalState(session?.state ?? session?.State)) {
+      await finalizeFromServer(session)
+      return
+    }
     // API returns camelCase JSON (sessionId, elapsedSeconds, state)
     if (session && session.sessionId) {
       // populate session id and sync elapsed seconds
@@ -291,6 +364,7 @@ async function tryRestoreSessionForWorkHour() {
 // Start overall timer on mount, clean up on unmount
 onMounted(() => {
   wallClockTimer = setInterval(() => { now.value = new Date() }, 1000)
+  sessionStatusTimer = setInterval(() => { if (!submitted.value) void syncSessionStatus() }, 5000)
   void fetchDailyWorkHours()
     // Only fetch aggregates on mount; do not toggle global isCountingTimerActive here
     void fetchAggregates()
@@ -299,6 +373,8 @@ onMounted(() => {
     void tryRestoreSessionForWorkHour()
 })
 onBeforeUnmount(() => {
+  disposed = true
+  if (sessionStatusTimer) clearInterval(sessionStatusTimer)
   if (wallClockTimer) clearInterval(wallClockTimer)
   if (messageTimeout) clearTimeout(messageTimeout)
   // ensure we clear local timer and global flag if active
@@ -340,6 +416,7 @@ async function startClock() {
   if (activeClock.value === 'active' || starting.value) return
   starting.value = true
   try {
+    if (!await syncSessionStatus() || submitted.value) return
     if (!await setWorkingBackend(currentWorkHourId.value)) return
     if (!localStart.value) localStart.value = new Date()
     activeClock.value = 'active'
@@ -353,7 +430,8 @@ async function startClock() {
 }
 
 const starting = ref(false)
-function pauseClock() {
+async function pauseClock() {
+  if (!await syncSessionStatus()) return
   if (submitted.value || activeClock.value !== 'active') return
   if (timer) clearInterval(timer)
   timer = null
@@ -366,6 +444,7 @@ function switchNcmInputs() {
 }
 
 async function submitWorkHours() {
+  if (submitted.value || !await syncSessionStatus() || submitted.value) return false
   // Mark current work hour as Completed, set EndTimeActual to now
   try {
     // Prefer using known id to avoid extra server queries
@@ -407,6 +486,7 @@ async function submitWorkHours() {
     showTransientMessage('Work hour completed.')
     return true
   } catch (err) {
+    if (err.response?.status === 409 && !await syncSessionStatus()) return false
     console.error('Failed to complete work hour', err)
     alert('Failed to complete work hour')
     return false
@@ -414,6 +494,7 @@ async function submitWorkHours() {
 }
 
 async function resetClocks() {
+  if (finalizedAt.value) return
   const id = currentWorkHourId.value
   const password = prompt('Enter password to reset all clocks:')
   // Hardcoded password for now; move to backend later
@@ -497,6 +578,9 @@ watch(serialNo, (nv, ov) => {
 // to a different existing WorkHour and attempt to resume its session
 watch(() => props.initialWorkHourId, (nv, ov) => {
   if (nv && nv !== ov) {
+    finalizedAt.value = null
+    frozenTodayTotal.value = null
+    submitted.value = false
     currentWorkHourId.value = nv
     void tryRestoreSessionForWorkHour()
   } else if (nv == null) {
@@ -551,6 +635,7 @@ async function startSessionIfNeeded() {
 // Replace sendHeartbeat to read server's response and sync elapsedSeconds/sessionId
 async function sendHeartbeat() {
   if (!sessionId.value) return
+  if (finalizedAt.value || !await syncSessionStatus() || finalizedAt.value) return
   try {
     const res = await axios.post('/api/WorkHours/session-heartbeat', {
       SessionId: sessionId.value,
@@ -559,6 +644,12 @@ async function sendHeartbeat() {
       MetadataJson: JSON.stringify({ ncmCount: ncmRows.value.length }),
       State: submitted.value ? 'Completed' : 'Working'
     }, { timeout: HEARTBEAT_TIMEOUT_MS })
+
+    if (disposed || finalizedAt.value) return
+    if (isTerminalState(res.data?.state ?? res.data?.State)) {
+      await finalizeFromServer(res.data)
+      return
+    }
 
     // on success, clear disconnected state and reset failure counter
     disconnected.value = false
@@ -578,6 +669,7 @@ async function sendHeartbeat() {
       sessionId.value = returnedSessionId
     }
   } catch (err) {
+    if (disposed || finalizedAt.value) return
     console.error('Heartbeat failed', err)
     // mark disconnected when request times out or network fails
     consecutiveHeartbeatFailures++
