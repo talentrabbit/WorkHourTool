@@ -13,8 +13,7 @@
           <span v-if="backendVersion"> | BE: {{ backendVersion }}</span>
         </div>
   <div class="user-info">{{ username }}</div>
-  <!-- <img :src="profileIcon" alt="Profile" :class="['profile-icon', { dimmed: username === 'Guest' }]" /> -->
-  <button v-if="username === 'Guest'" class="signin-btn" @click="openLogon" title="Sign in">Sign in</button>
+  <button v-if="!isLoggedIn" class="signin-btn" @click="openLogon" title="Sign in">Sign in</button>
     <button v-else class="signout-btn" @click="doSignOut" title="Sign out">Sign out</button>
       </div>
     </header>
@@ -57,14 +56,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, provide, watch } from 'vue'
+import { ref, onMounted, computed, provide } from 'vue'
 import axios from 'axios'
 import logoUrl from './assets/company-logo.png?url'
 import homeUrl from './assets/Home.jpeg?url'
-import profileIcon from './assets/profile-icon-vector.jpg?url'
 import { useRouter } from 'vue-router'
 
-const username = ref(localStorage.getItem('username') || 'Guest')
+let savedUsername = ''
+try { savedUsername = (localStorage.getItem('username') || '').trim() } catch {}
+const isLoggedIn = ref(Boolean(savedUsername))
+const username = ref(savedUsername || 'Guest')
 const userRole = ref(localStorage.getItem('userRole') || '')
 const userRoles = ref([])
 
@@ -114,22 +115,23 @@ function normalizeRolesFromResponse(data) {
 // Logon UI state
 const logonName = ref('')
 const allowGuest = ref(false)
-const showLogon = ref(username.value === 'Guest' && !allowGuest.value)
+const showLogon = ref(!isLoggedIn.value)
 const overlayVisible = computed(() => showLogon.value || allowGuest.value)
 
 async function applyUserFromResponse(data) {
-    if (!data) return
-    // remember previous values to avoid unnecessary navigation
-    const prevUser = username.value
-    const prevRole = userRole.value
+  const displayName = (data?.fullName || data?.displayName || data?.gid || '').trim()
+  if (!displayName) return false
 
-    username.value = data.fullName || data.user || data.gid || 'Guest'
+  username.value = displayName
     const nextRoles = normalizeRolesFromResponse(data)
     userRoles.value = nextRoles
     userRole.value = nextRoles[0] || ''
     try { localStorage.setItem('username', username.value) } catch {}
     try { localStorage.setItem('userRole', userRole.value) } catch {}
     try { localStorage.setItem('userRoles', JSON.stringify(userRoles.value)) } catch {}
+    isLoggedIn.value = true
+    showLogon.value = false
+    allowGuest.value = false
 
     // Navigate based on role but DO NOT force a full page reload.
     // Full reload caused an infinite refresh loop in some dev setups (blocked localStorage or proxy behavior).
@@ -147,6 +149,7 @@ async function applyUserFromResponse(data) {
     }
 
     // Do not call window.location.reload() here — let components handle their own mounted/data refresh.
+    return true
   }
 
 async function doLogon() {
@@ -155,9 +158,7 @@ async function doLogon() {
   try {
     const res = await axios.get('/api/auth/find-user', { params: { q: v } })
     if (res?.data) {
-      applyUserFromResponse(res.data)
-      showLogon.value = false
-      allowGuest.value = false
+      if (!await applyUserFromResponse(res.data)) alert('The selected user has no display name or account ID.')
       return
     }
   } catch (err) {
@@ -175,6 +176,7 @@ function doSignOut() {
   try { localStorage.removeItem('username') } catch {}
   try { localStorage.removeItem('userRole') } catch {}
   try { localStorage.removeItem('userRoles') } catch {}
+  isLoggedIn.value = false
   username.value = 'Guest'
   userRole.value = ''
   userRoles.value = []
@@ -193,26 +195,10 @@ function openLogon() {
   showLogon.value = true
 }
 
-watch(username, (nv) => {
-  showLogon.value = (!nv || nv === 'Guest') && !allowGuest.value
-})
-
 onMounted(async () => {
   loadFrontendVersion()
-  // trigger Negotiate handshake first (non-blocking)
-  // try {
-  //   await axios.get('/api/auth/challenge')
-  // } catch {}
-
-  // Attempt to read current-user (may be anonymous)
-  try {
-    const res = await axios.get('/api/auth/current-user')
-    if (res?.data?.user) {
-      applyUserFromResponse(res.data)
-    }
-  } catch (e) {
-    // ignore
-  }
+  // Portal identity is restored from storage or set by an explicit successful login.
+  // Windows authentication remains independent and must not overwrite that identity.
 
   // load worker names for legacy matching if needed
   try {
